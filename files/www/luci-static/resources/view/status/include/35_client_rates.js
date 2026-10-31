@@ -54,8 +54,10 @@ var CSS = ''
 	+ '.cr-ipwrap{display:flex;flex-direction:column;line-height:1.24;min-width:0}'
 	+ '.cr-ipwrap>span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
 	+ '.cr-ipwrap .cr-v6{font-size:11px;opacity:.66}'
-	/* 连接方式: 短文本整列居中, 与「连接数」数字自然分开, 表头和数据同一中线 */
-	+ '.cr-link{font-size:12.5px}'
+	/* 连接方式: 短文本整列居中, 表头和数据同一中线; 右移 6px 让表头两侧留白均衡
+	   (左邻「连接数」是右对齐数字, 贴得较近) */
+	+ '.cr-link,.cr-lk-in{font-size:12.5px;position:relative;left:6px;display:inline-block}'
+	+ '.cr-hosts-table th .cr-lk-in{font-size:inherit}'
 	+ '.cr-td-neg{font-variant-numeric:tabular-nums;line-height:1.2;text-align:right !important}'
 	+ '.cr-neg{display:flex;flex-direction:column;align-items:flex-end;font-size:11px;white-space:nowrap}'
 	+ '.cr-neg .cr-mhz{font-style:normal;font-size:10px;opacity:.62}'
@@ -386,7 +388,7 @@ return baseclass.extend({
 						E('th', { 'class': 'num' }, [_('上传')]),
 						E('th', { 'class': 'num' }, [_('下载')]),
 						E('th', { 'class': 'num' }, [_('连接数')]),
-						E('th', { 'class': 'ctr' }, [_('连接方式')]),
+						E('th', { 'class': 'ctr' }, [E('span', { 'class': 'cr-lk-in' }, [_('连接方式')])]),
 						E('th', { 'class': 'num' }, [_('接收速率')]),
 						E('th', { 'class': 'num' }, [_('发送速率')]),
 						E('th', { 'class': 'num' }, [_('信号强度')])
