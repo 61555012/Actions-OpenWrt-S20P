@@ -14,7 +14,8 @@ function fmtB(v) { return String.format('%1024.2mB', v || 0); }
 function stat(label, color) {
 	var val = E('div', { 'style': 'font-size:170%;font-weight:600;line-height:1.25' + (color ? ';color:' + color : '') }, ['-']);
 	var box = E('div', {
-		'style': 'flex:1 1 150px;min-width:140px;padding:12px 14px;border:1px solid rgba(128,128,128,.22);border-radius:10px;background:rgba(128,128,128,.04)'
+		// flex-basis 用 rem、min-width:0 + border-box，4 张卡片才能等分且不溢出容器
+		'style': 'flex:1 1 8rem;min-width:0;box-sizing:border-box;padding:12px 14px;border:1px solid rgba(128,128,128,.22);border-radius:10px;background:rgba(128,128,128,.04)'
 	}, [
 		E('div', { 'style': 'font-size:85%;opacity:.65;margin-bottom:4px' }, [label]),
 		val
@@ -50,10 +51,10 @@ return view.extend({
 			var key = c.mac || ('ip:' + c.ip);
 			var r = rows[key];
 			if (r) return r;
-			var nameEl = E('span', { 'style': 'font-weight:600' }, ['-']);
+			var nameEl = E('span', { 'style': 'font-weight:600;display:inline-block;max-width:8.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle' }, ['-']);
 			var subEl = E('span', { 'style': 'font-size:85%;opacity:.6;margin-left:6px' }, ['']);
 			var ipEl = E('span', {}, ['-']);
-			var macEl = E('span', { 'style': 'font-size:85%;opacity:.7' }, ['-']);
+			var macEl = E('span', {}, ['-']);
 			var downEl = E('span', { 'style': 'color:#2f7ed8;font-weight:600' }, ['-']);
 			var upEl = E('span', { 'style': 'color:#e08b2c;font-weight:600' }, ['-']);
 			var tDown = E('span', {}, ['-']);
@@ -96,6 +97,7 @@ return view.extend({
 				var title = c.host || brand.name(c.mac) || c.ip || c.mac || '?';
 				var vname = brand.name(c.mac);
 				r.nameEl.textContent = title;
+				r.nameEl.title = title;
 				r.subEl.textContent = (c.host && vname) ? vname : '';
 				r.ipEl.textContent = c.ip || '-';
 				r.macEl.textContent = c.mac || '-';
@@ -140,7 +142,7 @@ return view.extend({
 			}
 		}
 
-		var table = E('table', { 'class': 'table' }, [
+		var table = E('table', { 'class': 'table cr-dev-table' }, [
 			E('thead', {}, [
 				E('tr', { 'class': 'tr table-titles' }, [
 					E('th', { 'class': 'th' }, [_('设备')]),
@@ -161,7 +163,7 @@ return view.extend({
 			hint,
 			E('div', { 'style': 'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px' },
 				[sDown.box, sUp.box, sToday.box, sOnline.box]),
-			table
+			E('div', { 'class': 'cr-table-wrap' }, [table])
 		]);
 
 		update(data);

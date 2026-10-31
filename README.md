@@ -29,7 +29,10 @@ files/                                   # 公共文件, 构建时合并进固�
 
 说明：
 - 两套均将根目录 `files/` 合并进固件。
-- **argon / argon-config 均使用源码自带老版本**，已去除 jerrykuku 最新版的拉取动作。
+- **argon 主题与主题设置统一拉取 jerrykuku/luci-theme-argon `v3.1.1`**（v3 起设置页已并入主题包），构建前会清掉源码/feeds 里自带的旧版，避免同名包冲突。
+  - 默认值：登录页样式 `居中卡片(centered)`、壁纸来源 `Bing`（同时改 `/etc/config/argon` 与 `uci-defaults`）。
+  - 主题 `cascade.css` 在构建时追加 client-rates 的自定义样式（防火墙区域表、设备流量表列对齐、首页端口状态卡片尺寸），带 `==== client-rates:` 标记幂等。
+- `files/` 中的 `client-rates` 页面脚本（设备流量表格 `cr-dev-table` + 窄屏横向滚动）与上面的 CSS 配套。
 - 24.10 的插件集与 25.12 相同，额外增加 `wrtbwmon`；并在编译前强校验闭源 WiFi (`kmod-mt_wifi`) 与 MTK 硬件加速 (`kmod-mediatek_hnat` / `kmod-warp`) 已启用。
 
 ## Usage

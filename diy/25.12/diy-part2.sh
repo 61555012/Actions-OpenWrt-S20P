@@ -105,16 +105,61 @@ else
   echo "    [警告] 未找到 $CONFIG_GEN, 跳过"
 fi
 
-echo "==== [diy-part2] argon / argon-config: 保留源码(luci feed)自带老版本 ===="
-# 按要求: 已去除 jerrykuku 最新版的拉取动作, 不删除也不覆盖 feeds 自带的 argon。
-# 直接使用 luci feed 中随源码一起的 luci-theme-argon / luci-app-argon-config 老版本。
-echo "    跳过最新版拉取 -> 沿用源码自带 argon 主题与 argon 配置插件"
+echo "==== [diy-part2] argon: 拉取最新主题 + 主题设置 (v3.1.1) ===="
+# v3.x 起「Argon 主题设置」已并入主题包(同一 Makefile, LUCI_BASENAME=argon-config),
+# 因此只需一份源码; 另外把 compat/ 下的 luci-app-argon-config 空壳兼容包放进 package/,
+# 保证 .config 里历史的 CONFIG_PACKAGE_luci-app-argon-config=y 仍能解析。
+# 注意: 必须先清掉 feeds/源码里自带的旧版 argon, 否则同名包重复会导致编译失败。
+# 升级主题版本时只改 ARGON_REF 即可。
+ARGON_REPO=https://github.com/jerrykuku/luci-theme-argon
+ARGON_REF=v3.1.1
+rm -rf package/luci-theme-argon package/luci-app-argon-config
+find ./feeds ./package -maxdepth 4 -type d \
+  \( -name "luci-theme-argon*" -o -name "luci-app-argon-config*" \) \
+  -exec rm -rf {} + 2>/dev/null || true
+# feeds install 生成的符号链接指向已删除的旧目录, 一并清掉(rm 只删链接本身)
+find ./package/feeds -maxdepth 3 \
+  \( -name "luci-theme-argon*" -o -name "luci-app-argon-config*" \) \
+  -exec rm -rf {} + 2>/dev/null || true
+git clone --depth 1 -b "$ARGON_REF" "$ARGON_REPO" package/luci-theme-argon
+if [ -d package/luci-theme-argon/compat/luci-app-argon-config ]; then
+  cp -a package/luci-theme-argon/compat/luci-app-argon-config package/luci-app-argon-config
+  echo "    已放入 luci-app-argon-config 兼容包"
+fi
+echo "    argon 版本: $ARGON_REF / $(grep -m1 '^PKG_VERSION' package/luci-theme-argon/Makefile)"
 
-echo "==== [diy-part2] argon 主题: 追加 client-rates 自定义样式(防火墙区域表格排版) ===="
-# 目的: 修正防火墙「区域」表格的区域徽标排版(徽标被拉成整列宽色条 / 顶到单元格边缘),
-#       并在桌面宽度下把区域表还原成真实表格, 避免 LuCI 响应式卡片样式与上下区块不一致。
-# 做法: 构建时把样式追加进 argon 主题 cascade.css, 带标记幂等(重复执行会跳过)。
-CR_CSS_MARK='client-rates: 防火墙'
+echo "==== [diy-part2] argon 默认值: 登录页「居中卡片」+ 壁纸来源 Bing ===="
+# 主题包自带 /etc/config/argon(conffile) 与 /etc/uci-defaults/30_luci-theme-argon,
+# 两处都要改: 前者决定新装固件的初值, 后者在配置缺项时补默认(只会补缺, 不覆盖已有值)。
+ARGON_CFG=package/luci-theme-argon/root/etc/config/argon
+ARGON_DEF=package/luci-theme-argon/root/etc/uci-defaults/30_luci-theme-argon
+if [ -f "$ARGON_CFG" ]; then
+  sed -i \
+    -e "s/^\([[:space:]]*option login_style\).*/\1 'centered'/" \
+    -e "s/^\([[:space:]]*option online_wallpaper\).*/\1 'bing'/" \
+    "$ARGON_CFG"
+  echo "    config: $(grep -E 'login_style|online_wallpaper' "$ARGON_CFG" | tr -d '\t' | tr '\n' ' ')"
+else
+  echo "    [警告] 未找到 $ARGON_CFG"
+fi
+if [ -f "$ARGON_DEF" ]; then
+  sed -i \
+    -e 's/^login_style classic$/login_style centered/' \
+    -e 's/^online_wallpaper none$/online_wallpaper bing/' \
+    "$ARGON_DEF"
+  echo "    uci-defaults: $(grep -E '^(login_style|online_wallpaper) ' "$ARGON_DEF" | tr '\n' ' ')"
+else
+  echo "    [警告] 未找到 $ARGON_DEF"
+fi
+
+echo "==== [diy-part2] argon 主题: 追加 client-rates 自定义样式 ===="
+# 目的(全部针对 argon v3 的 DOM/CSS 特性):
+#   1) 防火墙「区域」表格: 区域徽标被拉成整列宽色条 / 顶到单元格边缘, 桌面宽度下还原真实表格;
+#   2) 「设备流量」表格: 窄屏时主题把 .table 拆成 thead/tbody 两个匿名表格导致表头错位,
+#      本页强制真实表格 + 表头按列对齐 + 容器内横向滚动;
+#   3) 首页「端口状态」卡片: 主题栅格带 !important, 用同款选择器缩到 100px 等距排列。
+# 做法: 构建时把样式追加进 argon 主题 cascade.css, 带 '==== client-rates:' 标记幂等(重复执行会跳过)。
+CR_CSS_MARK='==== client-rates:'
 CR_THEME_CSS=$(find feeds package -path '*argon*' -name cascade.css -type f 2>/dev/null || true)
 if [ -n "$CR_THEME_CSS" ]; then
   for f in $CR_THEME_CSS; do
@@ -198,6 +243,113 @@ if [ -n "$CR_THEME_CSS" ]; then
 	padding-bottom: 1rem !important;
 }
 /* ==== client-rates: 防火墙区块底部留白 (end) ==== */
+
+/* ==== client-rates: 「设备流量」表格列对齐 (begin) ==== */
+/* 主题在窄窗口(<1100px)会把 .table 改成 display:block，并把 tr/td 变成 flex/block，
+   原生表格被拆成 thead / tbody 两个匿名表格，列宽各算各的 → 表头与数据错位。
+   本页是纯数据表(非 CBI 表单)，统一保持真实表格，窄屏改为容器内横向滚动。 */
+.cr-table-wrap {
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+}
+.cr-table-wrap > .cr-dev-table {
+	display: table !important;
+	width: 100% !important;
+	min-width: 40rem;
+	font-size: 0.78125rem;
+}
+.cr-table-wrap > .cr-dev-table > thead {
+	display: table-header-group !important;
+}
+.cr-table-wrap > .cr-dev-table > tbody {
+	display: table-row-group !important;
+}
+.cr-table-wrap > .cr-dev-table tr {
+	display: table-row !important;
+}
+.cr-table-wrap > .cr-dev-table th,
+.cr-table-wrap > .cr-dev-table td {
+	display: table-cell !important;
+	width: auto !important;
+	float: none !important;
+	white-space: nowrap;
+	vertical-align: middle;
+	/* 主题默认 20px/20px，8 列光内边距就吃掉 320px，压到 6px 才放得下 */
+	padding-left: 0.375rem !important;
+	padding-right: 0.375rem !important;
+}
+.cr-table-wrap > .cr-dev-table th::before,
+.cr-table-wrap > .cr-dev-table td::before {
+	content: none !important;
+}
+/* 表头对齐到各自数据列：文本列左对齐、数值列右对齐、状态列居中
+   （主题默认把所有 th 居中，导致「设备/IP/MAC」表头浮在数据中间，看着没对齐） */
+.cr-table-wrap > .cr-dev-table th:nth-child(1),
+.cr-table-wrap > .cr-dev-table th:nth-child(2),
+.cr-table-wrap > .cr-dev-table th:nth-child(3) {
+	text-align: left !important;
+}
+.cr-table-wrap > .cr-dev-table th:nth-child(4),
+.cr-table-wrap > .cr-dev-table th:nth-child(5),
+.cr-table-wrap > .cr-dev-table th:nth-child(6),
+.cr-table-wrap > .cr-dev-table th:nth-child(7) {
+	text-align: right !important;
+}
+.cr-table-wrap > .cr-dev-table th:nth-child(8) {
+	text-align: center !important;
+}
+/* ==== client-rates: 「设备流量」表格列对齐 (end) ==== */
+
+/* ==== client-rates: 首页「端口状态」卡片尺寸 (begin) ==== */
+/* 以 192.168.1.1（argon 2.4.7）的观感为准：卡片固定 100px 宽、整行等距铺开，
+   内边距收紧、流量行强制单行不换行，避免 7 张卡片撑满一行显得笨重。
+   主题自带 minmax(min(100%,8.5rem),1fr) 的栅格带 !important，必须用同款选择器覆盖。 */
+[data-page="admin-status-overview"] #view div:has(> .ifacebox > .ifacebox-body > img[src*="/icons/port_"]),
+[data-page="admin-status"] #view div:has(> .ifacebox > .ifacebox-body > img[src*="/icons/port_"]) {
+	display: flex !important;
+	flex-wrap: wrap !important;
+	justify-content: space-evenly !important;
+	align-items: center !important;
+	gap: 0 !important;
+}
+[data-page="admin-status-overview"] #view .ifacebox:has(.argon-port-traffic),
+[data-page="admin-status"] #view .ifacebox:has(.argon-port-traffic) {
+	width: 100px !important;
+	max-width: 100px !important;
+	margin: .25em !important;
+}
+[data-page="admin-status-overview"] #view .ifacebox:has(.argon-port-traffic) .ifacebox-head,
+[data-page="admin-status"] #view .ifacebox:has(.argon-port-traffic) .ifacebox-head {
+	padding: 3.5px 4px !important;
+	font-size: 14px !important;
+	line-height: 1.3 !important;
+}
+[data-page="admin-status-overview"] #view .ifacebox:has(.argon-port-traffic) .ifacebox-body,
+[data-page="admin-status"] #view .ifacebox:has(.argon-port-traffic) .ifacebox-body {
+	padding: 12px 4px !important;
+}
+[data-page="admin-status-overview"] #view .ifacebox:has(.argon-port-traffic) .ifacebox-body img,
+[data-page="admin-status"] #view .ifacebox:has(.argon-port-traffic) .ifacebox-body img {
+	width: 30px !important;
+	height: 30px !important;
+}
+[data-page="admin-status-overview"] #view .argon-port-traffic,
+[data-page="admin-status"] #view .argon-port-traffic {
+	margin: 0 !important;
+	font-size: 80% !important;
+}
+[data-page="admin-status-overview"] #view .argon-port-traffic > div,
+[data-page="admin-status"] #view .argon-port-traffic > div {
+	flex-wrap: nowrap !important;
+	gap: 4px !important;
+}
+[data-page="admin-status-overview"] #view .argon-port-traffic dt,
+[data-page="admin-status-overview"] #view .argon-port-traffic dd,
+[data-page="admin-status"] #view .argon-port-traffic dt,
+[data-page="admin-status"] #view .argon-port-traffic dd {
+	font-size: 11px !important;
+}
+/* ==== client-rates: 首页「端口状态」卡片尺寸 (end) ==== */
 CR_CUSTOM_CSS
       grep -q "$CR_CSS_MARK" "$f" \
         && echo "    追加完成: $f" || { echo "    [错误] 追加失败: $f"; exit 1; }

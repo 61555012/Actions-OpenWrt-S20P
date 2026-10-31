@@ -7,7 +7,7 @@
 # 特性:
 #   - mosdns (sbwml 26.x golang feed + luci-app-mosdns v5 + v2ray-geodata)
 #   - OpenAppFilter (删除源码自带, 重拉 destan19 最新版)
-#   - argon / argon-config: 使用源码自带老版本 (已去除最新版拉取)
+#   - argon 主题 + 主题设置: 拉取 jerrykuku v3.1.1 (默认居中登录页 + Bing 壁纸)
 #   - 修复 2.5G 口 LED (dts-ext/mt7986a-clx-s20p.dts: 0x001b -> 0x321b)
 #   - 工具链缓存复用: actions/cache + Release(toolchain-cache) 双级缓存
 #   - 固件上传到本仓库 Releases

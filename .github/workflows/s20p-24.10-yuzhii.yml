@@ -8,7 +8,7 @@
 #   - 闭源 MTK WiFi (kmod-mt_wifi) + MTK 硬件加速 (HNAT / flow / WARP) 强校验
 #   - mosdns (sbwml v5) + v2ray-geodata + OpenAppFilter(destan19)
 #   - 额外 wrtbwmon (相对 25.12)
-#   - argon / argon-config: 使用源码自带老版本 (已去除最新版拉取)
+#   - argon 主题 + 主题设置: 拉取 jerrykuku v3.1.1 (默认居中登录页 + Bing 壁纸)
 #   - 根目录 files/ 自动合并进固件
 #   - 固件上传到本仓库 Releases
 #
