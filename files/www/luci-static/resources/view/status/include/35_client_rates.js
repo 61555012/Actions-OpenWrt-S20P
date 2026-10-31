@@ -14,7 +14,7 @@ var CSS = ''
 	+ 'border-radius:8px;background:rgba(127,127,127,.09);font-size:13px;margin:0 0 10px}'
 	+ '.cr-hosts-head .k{opacity:.6;margin-right:6px}'
 	+ '.cr-hosts-head .v{font-weight:600;font-variant-numeric:tabular-nums}'
-	+ '.cr-hosts-table{display:table;width:100%;min-width:60rem;font-size:13px;border-collapse:collapse;table-layout:fixed}'
+	+ '.cr-hosts-table{display:table;width:100%;min-width:66rem;font-size:13px;border-collapse:collapse;table-layout:fixed}'
 	+ '.cr-hosts-table th{font-weight:600;white-space:nowrap;padding:8px 8px !important;text-align:left;'
 	+ 'border-bottom:1px solid rgba(127,127,127,.25);overflow:hidden;text-overflow:ellipsis}'
 	+ '.cr-hosts-table td{padding:7px 8px !important;vertical-align:middle;overflow:hidden;white-space:nowrap;'
@@ -37,6 +37,9 @@ var CSS = ''
 	+ '.cr-mac,.cr-v6{font-family:inherit;font-size:inherit}'
 	/* 连接方式: 短文本整列居中, 与「连接数」数字自然分开, 表头和数据同一中线 */
 	+ '.cr-link{font-size:12.5px}'
+	+ '.cr-td-neg{font-variant-numeric:tabular-nums;line-height:1.2}'
+	+ '.cr-neg{display:flex;flex-direction:column;font-size:12px;white-space:nowrap}'
+	+ '.cr-neg .cr-mhz{font-style:normal;font-size:11px;opacity:.62}'
 	+ '.cr-rssi{font-variant-numeric:tabular-nums;font-size:12.5px}'
 	+ '.cr-hosts-table td.num{font-size:12.5px}'
 	+ '.cr-empty{padding:14px 4px;opacity:.6}'
@@ -77,8 +80,26 @@ function fmtRate(v) {
 	return String.format('%1024.2mB/s', v || 0);
 }
 
-function fmtB(v) {
-	return String.format('%1024.2mB', v || 0);
+/* 无线协商速率: iwinfo 给的是 1201.0, 取整显示; 2.4G 老模式没有频宽则只有速率。
+ * dir=rx 是客户端发来的(上行), dir=tx 是发给客户端的(下行)。
+ * 拆成两个节点(速率 + 频宽) 上下两行, 一行太长会把表格撑宽 40px。 */
+function setNegRate(el, r, dir) {
+	while (el.firstChild) el.removeChild(el.firstChild);
+	if (!r) { el.textContent = '-'; return; }
+	var v = (dir == 'rx') ? r.rx : r.tx;
+	var m = (dir == 'rx') ? r.rxm : r.txm;
+	if (v == null) { el.textContent = '-'; return; }
+	el.appendChild(document.createTextNode(Math.round(v) + '\u00a0Mbit/s'));
+	if (m) el.appendChild(E('em', { 'class': 'cr-mhz' }, [m + '\u00a0MHz']));
+}
+
+/* 卡片里是单行 label/value, 用这个拼成一整串 */
+function negRateText(r, dir) {
+	if (!r) return '-';
+	var v = (dir == 'rx') ? r.rx : r.tx;
+	var m = (dir == 'rx') ? r.rxm : r.txm;
+	if (v == null) return '-';
+	return Math.round(v) + '\u00a0Mbit/s' + (m ? ', ' + m + '\u00a0MHz' : '');
 }
 
 function rssiColor(v) {
@@ -135,9 +156,10 @@ function renderCell(c) {
 	var cMac = cardLine(_('MAC 地址'));
 	var cUp = cardLine(_('上传'));
 	var cDown = cardLine(_('下载'));
-	var cTotal = cardLine(_('总流量'));
 	var cConn = cardLine(_('连接数'));
 	var cLink = cardLine(_('连接方式'));
+	var cRx = cardLine(_('接收速率'));
+	var cTx = cardLine(_('发送速率'));
 	var cRssi = cardLine(_('信号强度'));
 
 	var card = E('div', { 'class': 'cr-card' + (c.online ? '' : ' off') }, [
@@ -149,8 +171,8 @@ function renderCell(c) {
 			cPill
 		]),
 		E('div', { 'class': 'cr-card-body' }, [
-			cIp.line, cIp6.line, cMac.line, cUp.line, cDown.line, cTotal.line, cConn.line,
-			cLink.line, cRssi.line
+			cIp.line, cIp6.line, cMac.line, cUp.line, cDown.line, cConn.line,
+			cLink.line, cRx.line, cTx.line, cRssi.line
 		])
 	]);
 
@@ -168,11 +190,13 @@ function renderCell(c) {
 		up: E('span', {}, ['-']),
 		down: E('span', {}, ['-']),
 		rssi: E('span', { 'class': 'cr-rssi' }, ['-']),
-		total: E('span', {}, ['-']),
 		conn: E('span', {}, ['-']),
 		link: E('span', { 'class': 'cr-link' }, [c.link || '-']),
+		rx: E('span', { 'class': 'cr-neg' }, [c.link ? (c.rate ? '\u2013' : '-') : '-']),
+		tx: E('span', { 'class': 'cr-neg' }, [c.link ? (c.rate ? '\u2013' : '-') : '-']),
 		card: card, cPill: cPill, cIp: cIp.v, cIp6: cIp6.v, cMac: cMac.v,
-		cUp: cUp.v, cDown: cDown.v, cTotal: cTotal.v, cConn: cConn.v, cLink: cLink.v, cRssi: cRssi.v
+		cUp: cUp.v, cDown: cDown.v, cConn: cConn.v, cLink: cLink.v,
+		cRx: cRx.v, cTx: cTx.v, cRssi: cRssi.v
 	};
 }
 
@@ -186,9 +210,10 @@ function newRow(c) {
 		E('td', {}, [cl.ip6]),
 		E('td', { 'class': 'num' }, [cl.up]),
 		E('td', { 'class': 'num' }, [cl.down]),
-		E('td', { 'class': 'num' }, [cl.total]),
 		E('td', { 'class': 'num' }, [cl.conn]),
 		E('td', { 'class': 'ctr' }, [cl.link]),
+		E('td', { 'class': 'cr-td-neg' }, [cl.rx]),
+		E('td', { 'class': 'cr-td-neg' }, [cl.tx]),
 		E('td', { 'class': 'num' }, [cl.rssi])
 	]);
 	tr._cr = cl;
@@ -221,9 +246,10 @@ function fill(tr, c) {
 		cl.cRssi.textContent = '-';
 		cl.cRssi.style.color = '';
 	}
-	cl.total.textContent = fmtB((c.up_today || 0) + (c.down_today || 0));
 	cl.conn.textContent = (c.conn != null) ? String(c.conn) : '-';
 	cl.link.textContent = c.link || '-';
+	setNegRate(cl.rx, c.link ? c.rate : null, 'rx');
+	setNegRate(cl.tx, c.link ? c.rate : null, 'tx');
 	tr.className = 'cr-row' + (c.online ? '' : ' off');
 
 	/* 卡片视图 */
@@ -236,9 +262,10 @@ function fill(tr, c) {
 	cl.cMac.textContent = c.mac || '-';
 	cl.cUp.textContent = fmtRate(c.up);
 	cl.cDown.textContent = fmtRate(c.down);
-	cl.cTotal.textContent = fmtB((c.up_today || 0) + (c.down_today || 0));
 	cl.cConn.textContent = (c.conn != null) ? String(c.conn) : '-';
 	cl.cLink.textContent = c.link || '-';
+	cl.cRx.textContent = negRateText(c.link ? c.rate : null, 'rx');
+	cl.cTx.textContent = negRateText(c.link ? c.rate : null, 'tx');
 }
 
 var timer = null;
@@ -300,17 +327,18 @@ return baseclass.extend({
 			E('div', { 'class': 'cr-hosts-wrap' }, [
 				E('table', { 'class': 'table cr-hosts-table' }, [
 					E('colgroup', {}, [
-						E('col', { 'style': 'width:4.5%' }),
-						E('col', { 'style': 'width:11.5%' }),
-						E('col', { 'style': 'width:13%' }),
+						E('col', { 'style': 'width:4%' }),
+						E('col', { 'style': 'width:12.9%' }),
+						E('col', { 'style': 'width:12.6%' }),
 						E('col', { 'style': 'width:10%' }),
-						E('col', { 'style': 'width:13.5%' }),
-						E('col', { 'style': 'width:9%' }),
-						E('col', { 'style': 'width:9%' }),
-						E('col', { 'style': 'width:8.5%' }),
+						E('col', { 'style': 'width:9.4%' }),
+						E('col', { 'style': 'width:8.7%' }),
+						E('col', { 'style': 'width:8.7%' }),
 						E('col', { 'style': 'width:5.5%' }),
-						E('col', { 'style': 'width:6.5%' }),
-						E('col', { 'style': 'width:9%' })
+						E('col', { 'style': 'width:6.6%' }),
+						E('col', { 'style': 'width:7.9%' }),
+						E('col', { 'style': 'width:7.9%' }),
+						E('col', { 'style': 'width:6.8%' })
 					]),
 					E('thead', {}, [E('tr', { 'class': 'cr-row' }, [
 						E('th', { 'class': 'ctr' }, [_('状态')]),
@@ -320,9 +348,10 @@ return baseclass.extend({
 						E('th', {}, [_('IPv6 地址')]),
 						E('th', { 'class': 'num' }, [_('上传')]),
 						E('th', { 'class': 'num' }, [_('下载')]),
-						E('th', { 'class': 'num' }, [_('总流量')]),
 						E('th', { 'class': 'num' }, [_('连接数')]),
 						E('th', { 'class': 'ctr' }, [_('连接方式')]),
+						E('th', {}, [_('接收速率')]),
+						E('th', {}, [_('发送速率')]),
 						E('th', { 'class': 'num' }, [_('信号强度')])
 					])]),
 					tbody

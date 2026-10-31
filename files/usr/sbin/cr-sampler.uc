@@ -112,12 +112,22 @@ const RSSI_CMD = 'for d in /sys/class/net/ra* /sys/class/net/wlan*; do [ -e "$d"
 	+ ' n="${d##*/}"; echo "==$n"; iwinfo "$n" assoclist 2>/dev/null; done';
 const RE_ASSOC = /^([0-9a-fA-F]+:[0-9a-fA-F]+:[0-9a-fA-F]+:[0-9a-fA-F]+:[0-9a-fA-F]+:[0-9a-fA-F]+)[ \t]+(-?[0-9]+)[ \t]*dBm/;
 const RE_DEVHDR = /^==(.+)$/;
+/* 协商速率行(在 MAC 行之后, 以 tab 缩进):
+ *   RX: 1201.0 MBit/s, HE-MCS 11, 80MHz, HE-NSS 2, HE-GI 0, HE-DCM 0   0 Pkts.
+ *   TX: 1.0 MBit/s                                 0 Pkts.
+ * 频宽不一定出现(2.4G 老模式只有 "RX: 1.0 MBit/s"), 单独抓 MHz。
+ * 从 AP 视角: RX = 客户端发过来的(上行), TX = 发给客户端的(下行)。
+ */
+const RE_RX  = /^[ \t]*RX:[ \t]*([0-9.]+)[ \t]*MBit\/s/;
+const RE_TX  = /^[ \t]*TX:[ \t]*([0-9.]+)[ \t]*MBit\/s/;
+const RE_MHZ = /([0-9]+)[ \t]*MHz/;
 let rssi = {};          // mac -> dBm
 let wifi_dev = {};      // mac -> 关联的 AP 接口名
 let links = {};         // mac -> '2.4G' | '5G' | 'lanX'
+let rates = {};         // mac -> { rx, rxm, tx, txm }  单位 Mbit/s / MHz
 
 function read_rssi() {
-	let map = {}, devs = {};
+	let map = {}, devs = {}, rmap = {};
 	let txt = null;
 	try {
 		let p = fs.popen(RSSI_CMD);
@@ -126,18 +136,40 @@ function read_rssi() {
 		p.close();
 	} catch (e) { return map; }
 	if (txt == null || !length(txt)) return map;
-	let lines = split(txt, '\n'), cur = null;
+	let lines = split(txt, '\n'), cur = null, cur_mac = null;
 	for (let i = 0; i < length(lines); i++) {
-		let mh = match(lines[i], RE_DEVHDR);
-		if (mh != null) { cur = mh[1]; continue; }
-		let m = match(lines[i], RE_ASSOC);
-		if (m == null) continue;
-		let mac = lc(m[1]), dbm = +m[2];
-		if (!match(mac, /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/)) continue;
-		let old = map[mac];
-		if (old == null || dbm > old) { map[mac] = dbm; devs[mac] = cur; }
+		let line = lines[i];
+		let mh = match(line, RE_DEVHDR);
+		if (mh != null) { cur = mh[1]; cur_mac = null; continue; }
+		let m = match(line, RE_ASSOC);
+		if (m != null) {
+			let mac = lc(m[1]), dbm = +m[2];
+			cur_mac = null;
+			if (!match(mac, /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/)) continue;
+			cur_mac = mac;
+			let old = map[mac];
+			if (old == null || dbm > old) { map[mac] = dbm; devs[mac] = cur; }
+			continue;
+		}
+		if (cur_mac == null) continue;
+		let mr = match(line, RE_RX);
+		if (mr != null) {
+			if (rmap[cur_mac] == null) rmap[cur_mac] = {};
+			rmap[cur_mac].rx = +mr[1];
+			let z = match(line, RE_MHZ);
+			if (z != null) rmap[cur_mac].rxm = +z[1];
+			continue;
+		}
+		let mt = match(line, RE_TX);
+		if (mt != null) {
+			if (rmap[cur_mac] == null) rmap[cur_mac] = {};
+			rmap[cur_mac].tx = +mt[1];
+			let z = match(line, RE_MHZ);
+			if (z != null) rmap[cur_mac].txm = +z[1];
+		}
 	}
 	wifi_dev = devs;
+	rates = rmap;
 	return map;
 }
 
@@ -687,6 +719,7 @@ function run() {
 			hours: ((t - c.last_seen) <= 43200) ? c.hours : {},
 			conn: c.conn, rssi: c.rssi,
 			link: (c.mac != null) ? (links[c.mac] ?? null) : null,
+			rate: (c.mac != null && rates[c.mac] != null) ? rates[c.mac] : null,
 			last_seen: int(c.last_seen), first_seen: int(c.first_seen),
 			online: on
 		});
