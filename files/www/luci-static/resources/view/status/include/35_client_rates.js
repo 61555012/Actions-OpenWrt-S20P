@@ -37,7 +37,37 @@ var CSS = ''
 	+ '.cr-mac{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;opacity:.85}'
 	+ '.cr-rssi{font-variant-numeric:tabular-nums;font-size:12.5px}'
 	+ '.cr-hosts-table td.num{font-size:12.5px}'
-	+ '.cr-empty{padding:14px 4px;opacity:.6}';
+	+ '.cr-empty{padding:14px 4px;opacity:.6}'
+	/* ===== 移动端: 卡片视图 (参考 OAF 用户列表的 user-card) ===== */
+	+ '.cr-hosts-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}'
+	+ '.cr-cards{display:none;flex-direction:column;gap:10px}'
+	+ '.cr-card{border:1px solid rgba(127,127,127,.22);border-radius:12px;padding:11px 13px;'
+	+ 'display:flex;flex-direction:column;gap:8px;box-sizing:border-box}'
+	+ '.cr-card.off{opacity:.72}'
+	+ '.cr-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}'
+	+ '.cr-card-dev{display:flex;align-items:center;gap:8px;min-width:0}'
+	+ '.cr-card-titwrap{min-width:0}'
+	+ '.cr-card-title{font-weight:700;font-size:14px;line-height:1.3;overflow:hidden;'
+	+ 'text-overflow:ellipsis;white-space:nowrap}'
+	+ '.cr-card-sub{margin-top:2px;font-size:11.5px;opacity:.6;overflow:hidden;text-overflow:ellipsis;'
+	+ 'white-space:nowrap}'
+	+ '.cr-card-pill{flex:0 0 auto;white-space:nowrap;font-size:11.5px;font-weight:600;padding:2px 8px;'
+	+ 'border-radius:999px;color:#22c55e;background:rgba(34,197,94,.16)}'
+	+ '.cr-card-pill.off{color:#9aa0a6;background:rgba(148,163,184,.22)}'
+	+ '.cr-card-body{display:flex;flex-direction:column;gap:6px}'
+	+ '.cr-card-line{display:flex;align-items:baseline;justify-content:space-between;gap:12px;'
+	+ 'font-size:12.5px;line-height:1.35}'
+	+ '.cr-card-k{flex:0 0 auto;opacity:.6}'
+	+ '.cr-card-v{min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+	+ 'font-variant-numeric:tabular-nums}'
+	+ '.cr-card-v.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}'
+	+ '@media (max-width:768px){'
+	+ '.cr-hosts-wrap{display:none!important}'
+	+ '.cr-cards{display:flex}'
+	+ '.cr-hosts-head{gap:10px 16px;padding:9px 11px;font-size:12.5px}'
+	/* 宽 IPv6 在 360px 以下会顶到省略号, 等宽值再收 1px */
+	+ '.cr-card-v.mono{font-size:10.5px}'
+	+ '}';
 
 function fmtRate(v) {
 	return String.format('%1024.2mB/s', v || 0);
@@ -66,10 +96,45 @@ function keyOf(c) {
 	return c.mac || ('ip:' + c.ip);
 }
 
+function cardLine(label, mono) {
+	var v = E('span', { 'class': 'cr-card-v' + (mono ? ' mono' : '') }, ['-']);
+	var line = E('div', { 'class': 'cr-card-line' }, [
+		E('span', { 'class': 'cr-card-k' }, [label]),
+		v
+	]);
+	return { line: line, v: v };
+}
+
 function renderCell(c) {
-	var title = c.host || brand.name(c.mac) || '-';
+	var title = c.host || brand.name(c.mac) || c.ip || '-';
 	var vd = (c.host && brand.name(c.mac)) ? brand.name(c.mac) : '';
 	var nameEl = E('span', { 'class': 'n', 'title': title }, [title]);
+	var cName = E('div', { 'class': 'cr-card-title', 'title': title }, [title]);
+	var cSub = E('div', { 'class': 'cr-card-sub' }, [vd]);
+	var cPill = E('span', { 'class': 'cr-card-pill' + (c.online ? '' : ' off') },
+		[c.online ? _('在线') : _('离线')]);
+	var cIp = cardLine(_('IPv4 地址'));
+	var cIp6 = cardLine(_('IPv6 地址'), true);
+	var cMac = cardLine(_('MAC 地址'), true);
+	var cUp = cardLine(_('上传'));
+	var cDown = cardLine(_('下载'));
+	var cTotal = cardLine(_('总流量'));
+	var cConn = cardLine(_('连接数'));
+	var cRssi = cardLine(_('信号强度'));
+
+	var card = E('div', { 'class': 'cr-card' + (c.online ? '' : ' off') }, [
+		E('div', { 'class': 'cr-card-head' }, [
+			E('div', { 'class': 'cr-card-dev' }, [
+				E('span', { 'class': 'ic' }, [brand.icon(c.mac, 24)]),
+				E('div', { 'class': 'cr-card-titwrap' }, [cName, vd ? cSub : ''])
+			]),
+			cPill
+		]),
+		E('div', { 'class': 'cr-card-body' }, [
+			cIp.line, cIp6.line, cMac.line, cUp.line, cDown.line, cTotal.line, cConn.line, cRssi.line
+		])
+	]);
+
 	return {
 		dot: E('span', { 'class': 'cr-dot' + (c.online ? '' : ' off') }),
 		host: E('div', { 'class': 'cr-hostname' }, [
@@ -85,7 +150,9 @@ function renderCell(c) {
 		down: E('span', {}, ['-']),
 		rssi: E('span', { 'class': 'cr-rssi' }, ['-']),
 		total: E('span', {}, ['-']),
-		conn: E('span', {}, ['-'])
+		conn: E('span', {}, ['-']),
+		card: card, cPill: cPill, cIp: cIp.v, cIp6: cIp6.v, cMac: cMac.v,
+		cUp: cUp.v, cDown: cDown.v, cTotal: cTotal.v, cConn: cConn.v, cRssi: cRssi.v
 	};
 }
 
@@ -110,7 +177,7 @@ function newRow(c) {
 function fill(tr, c) {
 	var cl = tr._cr;
 	cl.dot.className = 'cr-dot' + (c.online ? '' : ' off');
-	var title = c.host || brand.name(c.mac) || '-';
+	var title = c.host || brand.name(c.mac) || c.ip || '-';
 	if (cl.nameEl.textContent !== title) {
 		cl.nameEl.textContent = title;
 		cl.nameEl.title = title;
@@ -124,14 +191,31 @@ function fill(tr, c) {
 	if (c.rssi != null) {
 		cl.rssi.textContent = c.rssi + ' dBm';
 		cl.rssi.style.color = rssiColor(c.rssi);
+		cl.cRssi.textContent = c.rssi + ' dBm';
+		cl.cRssi.style.color = rssiColor(c.rssi);
 	}
 	else {
 		cl.rssi.textContent = '-';
 		cl.rssi.style.color = '';
+		cl.cRssi.textContent = '-';
+		cl.cRssi.style.color = '';
 	}
 	cl.total.textContent = fmtB((c.up_today || 0) + (c.down_today || 0));
 	cl.conn.textContent = (c.conn != null) ? String(c.conn) : '-';
 	tr.className = 'cr-row' + (c.online ? '' : ' off');
+
+	/* 卡片视图 */
+	cl.cPill.textContent = c.online ? _('在线') : _('离线');
+	cl.cPill.className = 'cr-card-pill' + (c.online ? '' : ' off');
+	cl.card.className = 'cr-card' + (c.online ? '' : ' off');
+	cl.cIp.textContent = c.ip || '-';
+	cl.cIp6.textContent = c.ip6 || '-';
+	cl.cIp6.title = c.ip6 || '';
+	cl.cMac.textContent = c.mac ? c.mac.toUpperCase() : '-';
+	cl.cUp.textContent = fmtRate(c.up);
+	cl.cDown.textContent = fmtRate(c.down);
+	cl.cTotal.textContent = fmtB((c.up_today || 0) + (c.down_today || 0));
+	cl.cConn.textContent = (c.conn != null) ? String(c.conn) : '-';
 }
 
 var timer = null;
@@ -180,6 +264,7 @@ return baseclass.extend({
 		var noteV = E('span', { 'class': 'v', 'style': 'font-weight:400;opacity:.6' }, ['']);
 
 		var tbody = E('tbody', {});
+		var cardsEl = E('div', { 'class': 'cr-cards' });
 		var empty = E('div', { 'class': 'cr-empty' }, [_('暂无在线设备')]);
 
 		var node = E('div', {}, [
@@ -189,38 +274,43 @@ return baseclass.extend({
 				E('span', {}, [E('span', { 'class': 'k' }, [_('下载总带宽')]), downV]),
 				E('span', {}, [noteV])
 			]),
-			E('table', { 'class': 'table cr-hosts-table' }, [
-				E('colgroup', {}, [
-					E('col', { 'style': 'width:6%' }),
-					E('col', { 'style': 'width:13%' }),
-					E('col', { 'style': 'width:13%' }),
-					E('col', { 'style': 'width:10.5%' }),
-					E('col', { 'style': 'width:17.5%' }),
-					E('col', { 'style': 'width:7.5%' }),
-					E('col', { 'style': 'width:7.5%' }),
-					E('col', { 'style': 'width:9%' }),
-					E('col', { 'style': 'width:6%' }),
-					E('col', { 'style': 'width:10%' })
-				]),
-				E('thead', {}, [E('tr', { 'class': 'cr-row' }, [
-					E('th', { 'class': 'ctr' }, [_('状态')]),
-					E('th', {}, [_('主机名')]),
-					E('th', {}, [_('MAC 地址')]),
-					E('th', {}, [_('IPv4 地址')]),
-					E('th', {}, [_('IPv6 地址')]),
-					E('th', { 'class': 'num' }, [_('上传')]),
-					E('th', { 'class': 'num' }, [_('下载')]),
-					E('th', { 'class': 'num' }, [_('总流量')]),
-					E('th', { 'class': 'num' }, [_('连接数')]),
-					E('th', { 'class': 'num' }, [_('信号强度')])
-				])]),
-				tbody
+			E('div', { 'class': 'cr-hosts-wrap' }, [
+				E('table', { 'class': 'table cr-hosts-table' }, [
+					E('colgroup', {}, [
+						E('col', { 'style': 'width:6%' }),
+						E('col', { 'style': 'width:13%' }),
+						E('col', { 'style': 'width:13%' }),
+						E('col', { 'style': 'width:10.5%' }),
+						E('col', { 'style': 'width:17.5%' }),
+						E('col', { 'style': 'width:7.5%' }),
+						E('col', { 'style': 'width:7.5%' }),
+						E('col', { 'style': 'width:9%' }),
+						E('col', { 'style': 'width:6%' }),
+						E('col', { 'style': 'width:10%' })
+					]),
+					E('thead', {}, [E('tr', { 'class': 'cr-row' }, [
+						E('th', { 'class': 'ctr' }, [_('状态')]),
+						E('th', {}, [_('主机名')]),
+						E('th', {}, [_('MAC 地址')]),
+						E('th', {}, [_('IPv4 地址')]),
+						E('th', {}, [_('IPv6 地址')]),
+						E('th', { 'class': 'num' }, [_('上传')]),
+						E('th', { 'class': 'num' }, [_('下载')]),
+						E('th', { 'class': 'num' }, [_('总流量')]),
+						E('th', { 'class': 'num' }, [_('连接数')]),
+						E('th', { 'class': 'num' }, [_('信号强度')])
+					])]),
+					tbody
+				])
 			]),
+			cardsEl,
 			empty
 		]);
 
 		this.root = node;
 		this.body = tbody;
+		this.cardsEl = cardsEl;
+		this.cardOrder = '';
 		this.emptyEl = empty;
 		this.rows = {};
 		this.onlineEl = onlineV;
@@ -255,10 +345,23 @@ return baseclass.extend({
 
 			for (k in this.rows) {
 				if (!seen[k]) {
+					var cd = this.rows[k]._cr.card;
+					if (cd.parentNode)
+						cd.parentNode.removeChild(cd);
 					if (this.rows[k].parentNode)
 						this.rows[k].parentNode.removeChild(this.rows[k]);
 					delete this.rows[k];
 				}
+			}
+
+			/* 卡片视图: 与表格同序, 仅顺序变化时重排, 避免每秒抖动 */
+			var ord = [];
+			for (i = 0; i < list.length; i++)
+				ord.push(keyOf(list[i]));
+			if (ord.join('|') !== this.cardOrder) {
+				this.cardOrder = ord.join('|');
+				for (i = 0; i < list.length; i++)
+					this.cardsEl.appendChild(this.rows[keyOf(list[i])]._cr.card);
 			}
 
 			this.emptyEl.style.display = list.length ? 'none' : '';
