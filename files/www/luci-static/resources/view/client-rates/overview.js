@@ -56,6 +56,11 @@ var CSS = ''
 	+ '.cr-dev-card-v{min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
 	+ 'font-variant-numeric:tabular-nums}'
 	+ '.cr-dev-card-v.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}'
+	/* 状态列表头居中(cascade.css 里 th:nth-child(8)), 单元格原来带 .td.left 左对齐,
+	 * 两边一个居中一个贴左, 看着永远差半格 → 单元格也居中 */
+	+ '.cr-table-wrap > .cr-dev-table > tbody > tr > td:nth-child(8){text-align:center!important}'
+	/* MAC 与「在线主机」页保持一致: 等宽小字 */
+	+ '.cr-table-wrap > .cr-dev-table > tbody > tr > td:nth-child(3){font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;opacity:.85}'
 	+ '.cr-dev-empty{padding:14px 4px;opacity:.6;text-align:center}'
 	+ '.cr-tup{margin-left:.4em}'
 	+ '@media (max-width:768px){'

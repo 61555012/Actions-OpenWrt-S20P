@@ -103,17 +103,21 @@ function read_arp() {
 	return map;
 }
 
-/* ---------- 无线信号强度 ----------
+/* ---------- 无线信号强度 + 关联接口 ----------
  * iwinfo <dev> assoclist 输出:  AA:BB:CC:DD:EE:FF  -55 dBm / -95 dBm (SNR 40)  ...
- * 一次 shell 汇总所有 AP 接口, 同一 MAC 多接口关联取较强者。
+ * 一次 shell 汇总所有 AP 接口, 同一 MAC 多接口关联取较强者; 同时记下接口名,
+ * 后面据此判断是 2.4G 还是 5G(见 band_of())。
  */
 const RSSI_CMD = 'for d in /sys/class/net/ra* /sys/class/net/wlan*; do [ -e "$d" ] || continue;'
-	+ ' iwinfo "${d##*/}" assoclist 2>/dev/null; done';
+	+ ' n="${d##*/}"; echo "==$n"; iwinfo "$n" assoclist 2>/dev/null; done';
 const RE_ASSOC = /^([0-9a-fA-F]+:[0-9a-fA-F]+:[0-9a-fA-F]+:[0-9a-fA-F]+:[0-9a-fA-F]+:[0-9a-fA-F]+)[ \t]+(-?[0-9]+)[ \t]*dBm/;
+const RE_DEVHDR = /^==(.+)$/;
 let rssi = {};          // mac -> dBm
+let wifi_dev = {};      // mac -> 关联的 AP 接口名
+let links = {};         // mac -> '2.4G' | '5G' | 'lanX'
 
 function read_rssi() {
-	let map = {};
+	let map = {}, devs = {};
 	let txt = null;
 	try {
 		let p = fs.popen(RSSI_CMD);
@@ -122,16 +126,92 @@ function read_rssi() {
 		p.close();
 	} catch (e) { return map; }
 	if (txt == null || !length(txt)) return map;
-	let lines = split(txt, '\n');
+	let lines = split(txt, '\n'), cur = null;
 	for (let i = 0; i < length(lines); i++) {
+		let mh = match(lines[i], RE_DEVHDR);
+		if (mh != null) { cur = mh[1]; continue; }
 		let m = match(lines[i], RE_ASSOC);
 		if (m == null) continue;
 		let mac = lc(m[1]), dbm = +m[2];
 		if (!match(mac, /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/)) continue;
 		let old = map[mac];
-		if (old == null || dbm > old) map[mac] = dbm;
+		if (old == null || dbm > old) { map[mac] = dbm; devs[mac] = cur; }
 	}
+	wifi_dev = devs;
 	return map;
+}
+
+/* ---------- 连接方式: 2.4G / 5G / 6G / 具体网口 ----------
+ * 无线: assoclist 给出关联接口, 再用 iwinfo <dev> info 的频道频率判频段(结果缓存,
+ *       接口频段运行期不会变, 不必每轮都问)。
+ * 有线: 桥里没有 iw 信息, 用 brctl 的端口号 -> 接口名映射 + MAC 表反查走哪个口。
+ *       桥端口顺序由内核决定, 必须按 brctl show 输出的顺序编号, 不能写死。
+ */
+let wifi_band = {};     // iface -> '2.4G' | '5G' | '6G'
+
+function band_of(dev) {
+	let b = wifi_band[dev];
+	if (b != null) return b;
+	let freq = 0, txt = null;
+	try {
+		let p = fs.popen('iwinfo ' + dev + ' info 2>/dev/null');
+		if (p != null) { txt = p.read('all'); p.close(); }
+	} catch (e) { }
+	if (txt != null) {
+		let m = match(txt, /Channel:\s*[0-9]+\s*\(([0-9.]+)\s*GHz\)/);
+		if (m != null) freq = int(+m[1] * 1000);
+	}
+	b = (freq >= 5925) ? '6G' : (freq >= 3000) ? '5G' : (freq > 0) ? '2.4G' : '';
+	wifi_band[dev] = b;
+	return b;
+}
+
+function read_links() {
+	let out = {};
+	/* 无线: 本轮 assoclist 关联到的接口 */
+	for (let mac in wifi_dev) {
+		let b = band_of(wifi_dev[mac]);
+		if (length(b)) out[mac] = b;
+	}
+	/* 有线: 端口号 -> 接口名。brctl show 的接口列表顺序不等于端口号(按 hash 排),
+	 * 必须用 showstp 里行尾括号中的编号, 否则 lanX 会被映射成隔壁的 raX */
+	let ports = {};
+	try {
+		let p = fs.popen('brctl showstp br-lan 2>/dev/null');
+		let txt = (p != null) ? p.read('all') : null;
+		if (p != null) p.close();
+		if (txt != null) {
+			let lines = split(txt, '\n');
+			for (let i = 0; i < length(lines); i++) {
+				let m = match(trim(lines[i]), /^(\S+)\s+\(([0-9]+)\)$/);
+				if (m == null) continue;
+				ports[+m[2]] = m[1];
+			}
+		}
+	} catch (e) { }
+	/* MAC 表: 只看非本地条目(no), 本地的是桥/接口自身 MAC */
+	try {
+		let p = fs.popen('brctl showmacs br-lan 2>/dev/null');
+		let txt = (p != null) ? p.read('all') : null;
+		if (p != null) p.close();
+		if (txt != null) {
+			let lines = split(txt, '\n');
+			for (let i = 1; i < length(lines); i++) {
+				let f = split(trim(lines[i]), /[ \t]+/);
+				if (length(f) < 3) continue;
+				if (f[2] != 'no') continue;
+				let mac = lc(f[1]);
+				if (!match(mac, /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/)) continue;
+				if (out[mac] != null) continue;   // 关联表已给出频段, 以它为准
+				let dev = ports[+f[0]];
+				if (dev == null) continue;
+				/* 桥里的无线口(ra0 / rax0 之类)换成频段名, 其余直接显示网口名 */
+				let name = match(dev, /^(ra|wlan)/) ? band_of(dev) : dev;
+				if (length(name)) out[mac] = name;
+			}
+		}
+	} catch (e) { }
+	return out;
 }
 
 function read_leases() {
@@ -512,7 +592,7 @@ function run() {
 		for (let a in v6pool)
 			if ((t - v6pool[a].t) > V6_TTL) delete v6pool[a];
 	}
-	if (tick % RSSI_EVERY == 0) rssi = read_rssi();
+	if (tick % RSSI_EVERY == 0) { rssi = read_rssi(); links = read_links(); }
 
 	let cur = {}, seen = {};
 	sample_ct(cur, seen, t);
@@ -606,6 +686,7 @@ function run() {
 			up_today: int(c.up_today), down_today: int(c.down_today),
 			hours: ((t - c.last_seen) <= 43200) ? c.hours : {},
 			conn: c.conn, rssi: c.rssi,
+			link: (c.mac != null) ? (links[c.mac] ?? null) : null,
 			last_seen: int(c.last_seen), first_seen: int(c.first_seen),
 			online: on
 		});

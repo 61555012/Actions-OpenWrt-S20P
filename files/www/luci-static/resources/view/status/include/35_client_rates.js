@@ -14,7 +14,7 @@ var CSS = ''
 	+ 'border-radius:8px;background:rgba(127,127,127,.09);font-size:13px;margin:0 0 10px}'
 	+ '.cr-hosts-head .k{opacity:.6;margin-right:6px}'
 	+ '.cr-hosts-head .v{font-weight:600;font-variant-numeric:tabular-nums}'
-	+ '.cr-hosts-table{display:table;width:100%;font-size:13px;border-collapse:collapse;table-layout:fixed}'
+	+ '.cr-hosts-table{display:table;width:100%;min-width:60rem;font-size:13px;border-collapse:collapse;table-layout:fixed}'
 	+ '.cr-hosts-table th{font-weight:600;white-space:nowrap;padding:8px 8px !important;text-align:left;'
 	+ 'border-bottom:1px solid rgba(127,127,127,.25);overflow:hidden;text-overflow:ellipsis}'
 	+ '.cr-hosts-table td{padding:7px 8px !important;vertical-align:middle;overflow:hidden;white-space:nowrap;'
@@ -33,8 +33,9 @@ var CSS = ''
 	+ '.cr-hostname .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;min-width:0;max-width:100%}'
 	+ '.cr-hostname .vd{opacity:.55;font-size:88%;margin-left:5px;white-space:nowrap;flex:0 0 auto;'
 	+ 'overflow:hidden;text-overflow:ellipsis;max-width:40%}'
-	+ '.cr-v6{font-size:11px;opacity:.8;font-family:ui-monospace,Menlo,Consolas,monospace}'
-	+ '.cr-mac{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;opacity:.85}'
+	/* MAC 与 IPv6 用同一套等宽小字(字号/透明度/字体一致), 区别只在内容长度 */
+	+ '.cr-v6,.cr-mac{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;opacity:.85}'
+	+ '.cr-link{font-size:12px;opacity:.85}'
 	+ '.cr-rssi{font-variant-numeric:tabular-nums;font-size:12.5px}'
 	+ '.cr-hosts-table td.num{font-size:12.5px}'
 	+ '.cr-empty{padding:14px 4px;opacity:.6}'
@@ -138,6 +139,7 @@ function renderCell(c) {
 	var cDown = cardLine(_('下载'));
 	var cTotal = cardLine(_('总流量'));
 	var cConn = cardLine(_('连接数'));
+	var cLink = cardLine(_('连接方式'));
 	var cRssi = cardLine(_('信号强度'));
 
 	var card = E('div', { 'class': 'cr-card' + (c.online ? '' : ' off') }, [
@@ -149,7 +151,8 @@ function renderCell(c) {
 			cPill
 		]),
 		E('div', { 'class': 'cr-card-body' }, [
-			cIp.line, cIp6.line, cMac.line, cUp.line, cDown.line, cTotal.line, cConn.line, cRssi.line
+			cIp.line, cIp6.line, cMac.line, cUp.line, cDown.line, cTotal.line, cConn.line,
+			cLink.line, cRssi.line
 		])
 	]);
 
@@ -163,14 +166,15 @@ function renderCell(c) {
 		nameEl: nameEl,
 		ip: E('span', {}, [c.ip || '-']),
 		ip6: E('span', { 'class': 'cr-v6', 'title': c.ip6 || '' }, [c.ip6 || '-']),
-		mac: E('span', { 'class': 'cr-mac' }, [c.mac ? c.mac.toUpperCase() : '-']),
+		mac: E('span', { 'class': 'cr-mac' }, [c.mac || '-']),
 		up: E('span', {}, ['-']),
 		down: E('span', {}, ['-']),
 		rssi: E('span', { 'class': 'cr-rssi' }, ['-']),
 		total: E('span', {}, ['-']),
 		conn: E('span', {}, ['-']),
+		link: E('span', { 'class': 'cr-link' }, [c.link || '-']),
 		card: card, cPill: cPill, cIp: cIp.v, cIp6: cIp6.v, cMac: cMac.v,
-		cUp: cUp.v, cDown: cDown.v, cTotal: cTotal.v, cConn: cConn.v, cRssi: cRssi.v
+		cUp: cUp.v, cDown: cDown.v, cTotal: cTotal.v, cConn: cConn.v, cLink: cLink.v, cRssi: cRssi.v
 	};
 }
 
@@ -186,6 +190,7 @@ function newRow(c) {
 		E('td', { 'class': 'num' }, [cl.down]),
 		E('td', { 'class': 'num' }, [cl.total]),
 		E('td', { 'class': 'num' }, [cl.conn]),
+		E('td', {}, [cl.link]),
 		E('td', { 'class': 'num' }, [cl.rssi])
 	]);
 	tr._cr = cl;
@@ -203,7 +208,7 @@ function fill(tr, c) {
 	cl.ip.textContent = c.ip || '-';
 	cl.ip6.textContent = c.ip6 || '-';
 	cl.ip6.title = c.ip6 || '';
-	cl.mac.textContent = c.mac ? c.mac.toUpperCase() : '-';
+	cl.mac.textContent = c.mac || '-';
 	cl.up.textContent = fmtRate(c.up);
 	cl.down.textContent = fmtRate(c.down);
 	if (c.rssi != null) {
@@ -220,6 +225,7 @@ function fill(tr, c) {
 	}
 	cl.total.textContent = fmtB((c.up_today || 0) + (c.down_today || 0));
 	cl.conn.textContent = (c.conn != null) ? String(c.conn) : '-';
+	cl.link.textContent = c.link || '-';
 	tr.className = 'cr-row' + (c.online ? '' : ' off');
 
 	/* 卡片视图 */
@@ -229,11 +235,12 @@ function fill(tr, c) {
 	cl.cIp.textContent = c.ip || '-';
 	cl.cIp6.textContent = c.ip6 || '-';
 	cl.cIp6.title = c.ip6 || '';
-	cl.cMac.textContent = c.mac ? c.mac.toUpperCase() : '-';
+	cl.cMac.textContent = c.mac || '-';
 	cl.cUp.textContent = fmtRate(c.up);
 	cl.cDown.textContent = fmtRate(c.down);
 	cl.cTotal.textContent = fmtB((c.up_today || 0) + (c.down_today || 0));
 	cl.cConn.textContent = (c.conn != null) ? String(c.conn) : '-';
+	cl.cLink.textContent = c.link || '-';
 }
 
 var timer = null;
@@ -295,15 +302,16 @@ return baseclass.extend({
 			E('div', { 'class': 'cr-hosts-wrap' }, [
 				E('table', { 'class': 'table cr-hosts-table' }, [
 					E('colgroup', {}, [
+						E('col', { 'style': 'width:4.5%' }),
+						E('col', { 'style': 'width:12.5%' }),
+						E('col', { 'style': 'width:12%' }),
+						E('col', { 'style': 'width:10%' }),
+						E('col', { 'style': 'width:16%' }),
+						E('col', { 'style': 'width:7%' }),
+						E('col', { 'style': 'width:7%' }),
+						E('col', { 'style': 'width:7%' }),
 						E('col', { 'style': 'width:6%' }),
-						E('col', { 'style': 'width:13%' }),
-						E('col', { 'style': 'width:13%' }),
-						E('col', { 'style': 'width:10.5%' }),
-						E('col', { 'style': 'width:17.5%' }),
-						E('col', { 'style': 'width:7.5%' }),
-						E('col', { 'style': 'width:7.5%' }),
-						E('col', { 'style': 'width:9%' }),
-						E('col', { 'style': 'width:6%' }),
+						E('col', { 'style': 'width:8%' }),
 						E('col', { 'style': 'width:10%' })
 					]),
 					E('thead', {}, [E('tr', { 'class': 'cr-row' }, [
@@ -316,6 +324,7 @@ return baseclass.extend({
 						E('th', { 'class': 'num' }, [_('下载')]),
 						E('th', { 'class': 'num' }, [_('总流量')]),
 						E('th', { 'class': 'num' }, [_('连接数')]),
+						E('th', {}, [_('连接方式')]),
 						E('th', { 'class': 'num' }, [_('信号强度')])
 					])]),
 					tbody
