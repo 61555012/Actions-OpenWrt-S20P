@@ -24,6 +24,7 @@ const STATE_PATH  = STATE_DIR + '/state.json';
 const INTERVAL    = 1;
 const SAVE_EVERY  = 30;
 const ONLINE_WIN  = 120;
+const OFFLINE_WIN = 86400;  // 离线设备只在列表里保留最近 24h, 避免设备多时列表过长
 const RATE_ALPHA  = 0.55;
 const NEIGH_EVERY = 5;      // 每 5 个 tick 取一次 IPv6 邻居表
 const RSSI_EVERY  = 10;     // 每 10 个 tick 取一次无线信号强度
@@ -431,7 +432,7 @@ function load_state() {
 			mac: c.mac, ip: c.ip, host: c.host, ip6: c.ip6,
 			up_today: +c.up_today || 0, down_today: +c.down_today || 0,
 			hours: (type(c.hours) == 'object') ? c.hours : {},
-			first_seen: +c.first_seen || now(), last_seen: 0,
+			first_seen: +c.first_seen || now(), last_seen: +c.last_seen || 0,
 			up_rate: 0, down_rate: 0, conn: 0, rssi: null
 		};
 	}
@@ -443,10 +444,11 @@ function save_state() {
 	let cut = now() - KEEP_DAYS * 86400;
 	for (let k in clients) {
 		let c = clients[k];
-		if (c.last_seen > 0 && c.last_seen < cut) continue;
+		let ref_t = (c.last_seen > 0) ? c.last_seen : c.first_seen;
+		if (ref_t > 0 && ref_t < cut) continue;
 		out.clients[k] = { mac: c.mac, ip: c.ip, host: c.host, ip6: c.ip6,
 			up_today: c.up_today, down_today: c.down_today,
-			hours: c.hours, first_seen: c.first_seen };
+			hours: c.hours, first_seen: c.first_seen, last_seen: c.last_seen };
 	}
 	try { fs.mkdir(STATE_DIR, 0755); } catch (e) { }
 	try {
@@ -578,7 +580,7 @@ function run() {
 	}
 
 	let tot_up = 0, tot_dn = 0;
-	let list = [], online = 0;
+	let list = [], online = 0, hidden = 0;
 	for (let k in clients) {
 		let c = clients[k];
 		let s = seen_bw[k] || [0, 0];
@@ -590,6 +592,14 @@ function run() {
 		tot_up += c.up_rate; tot_dn += c.down_rate;
 		let on = ((t - c.last_seen) <= ONLINE_WIN);
 		if (on) online++;
+		/* 离线且超过 24h 没出现的设备不再输出:
+		 * last_seen 为 0 时(旧版 state 没存该字段 / 本轮还没观测到)退回 first_seen 判断,
+		 * 避免升级后把今天才出现过的设备一次性全部隐藏 */
+		let ref_t = (c.last_seen > 0) ? c.last_seen : c.first_seen;
+		if (!on && (t - ref_t) > OFFLINE_WIN) {
+			hidden++;
+			continue;
+		}
 		push(list, {
 			mac: c.mac, ip: c.ip, ip6: c.ip6, host: c.host,
 			up: int(c.up_rate), down: int(c.down_rate),
@@ -625,7 +635,7 @@ function run() {
 		wan: { up: int(tot_up), down: int(tot_dn), up_today: int(up_today),
 		       down_today: int(down_today), hours: wan_hours, daily: daily },
 		sec: { up: int(tick_up), down: int(tick_dn) },
-		online: online, total: length(list),
+		online: online, total: length(list), hidden: hidden,
 		clients: slice(list, 0, 128)
 	};
 	try {

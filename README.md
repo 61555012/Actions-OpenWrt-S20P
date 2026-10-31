@@ -33,6 +33,7 @@ files/                                   # 公共文件, 构建时合并进固�
   - 默认值：登录页样式 `居中卡片(centered)`、壁纸来源 `Bing`（同时改 `/etc/config/argon` 与 `uci-defaults`）。
   - 主题 `cascade.css` 在构建时追加 client-rates 的自定义样式（防火墙区域表、设备流量表列对齐、首页端口状态卡片尺寸），带 `==== client-rates:` 标记幂等。
 - `files/` 中的 `client-rates` 页面脚本（设备流量表格 `cr-dev-table` + 窄屏横向滚动）与上面的 CSS 配套。
+- 「在线主机」「设备流量」列表只保留**在线 + 最近 24 小时内出现过的离线设备**（`cr-sampler.uc` 的 `OFFLINE_WIN`，前端按 `last_seen`/`first_seen` 兜底），更早的设备不再输出，避免设备多时列表过长；状态胶囊在线为绿、离线为中性灰。
 - 24.10 的插件集与 25.12 相同，额外增加 `wrtbwmon`；并在编译前强校验闭源 WiFi (`kmod-mt_wifi`) 与 MTK 硬件加速 (`kmod-mediatek_hnat` / `kmod-warp`) 已启用。
 
 ## Usage

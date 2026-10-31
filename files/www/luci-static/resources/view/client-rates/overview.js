@@ -11,6 +11,24 @@ var callStatus = rpc.declare({
 function fmtRate(v) { return String.format('%1024.2mB/s', v || 0); }
 function fmtB(v) { return String.format('%1024.2mB', v || 0); }
 
+/* 离线设备只在列表里保留最近 24h 出现过的(与后端 cr-sampler 的 OFFLINE_WIN 一致) */
+var OFFLINE_WIN = 86400;
+
+/* 后端已过滤, 这里兜底: 兼容只更新了前端的旧固件 */
+function keepRecent(list, ts) {
+	var nowSec = ts || Math.floor(Date.now() / 1000);
+	var hid = 0;
+	var out = list.filter(function (c) {
+		if (c.online) return true;
+		/* last_seen 缺失时退回 first_seen, 与后端口径一致 */
+		var ref = c.last_seen || c.first_seen || 0;
+		if (!ref || (nowSec - ref) <= OFFLINE_WIN) return true;
+		hid++;
+		return false;
+	});
+	return { list: out, hidden: hid };
+}
+
 /* ===== 移动端: 卡片视图 (参考 OAF 用户列表的 user-card) ===== */
 var STYLE_ID = 'cr-dev-style';
 var CSS = ''
@@ -24,9 +42,13 @@ var CSS = ''
 	+ 'text-overflow:ellipsis;white-space:nowrap}'
 	+ '.cr-dev-card-sub{margin-top:2px;font-size:11.5px;opacity:.6;overflow:hidden;text-overflow:ellipsis;'
 	+ 'white-space:nowrap}'
-	+ '.cr-dev-card-pill{flex:0 0 auto;white-space:nowrap;font-size:11.5px;font-weight:600;padding:2px 8px;'
-	+ 'border-radius:999px;color:#22c55e;background:rgba(34,197,94,.16)}'
-	+ '.cr-dev-card-pill.off{color:#9aa0a6;background:rgba(148,163,184,.22)}'
+	/* 状态胶囊: 在线=绿, 离线=中性灰。不用 LuCI 的 label.notice —— 主题把 notice 渲染成
+	 * 主色蓝青, 和「在线」一样抢眼, 语义反了; 暗色下再用浅一档的字色保证对比度 */
+	+ '.cr-dev-pill{display:inline-block;white-space:nowrap;font-size:12px;line-height:1.5;font-weight:600;'
+	+ 'padding:1px 9px;border-radius:999px;border:1px solid transparent;box-sizing:border-box}'
+	+ '.cr-dev-pill.on{color:#15803d;background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.38)}'
+	+ '.cr-dev-pill.off{color:#6b7280;background:rgba(148,163,184,.14);border-color:rgba(148,163,184,.32)}'
+	+ '.cr-dev-card-pill{flex:0 0 auto;font-size:11.5px;padding:2px 8px}'
 	+ '.cr-dev-card-body{display:flex;flex-direction:column;gap:6px}'
 	+ '.cr-dev-card-line{display:flex;align-items:baseline;justify-content:space-between;gap:12px;'
 	+ 'font-size:12.5px;line-height:1.35}'
@@ -43,6 +65,11 @@ var CSS = ''
 	+ '.cr-dev-stats>div{padding:9px 11px!important;flex:1 1 7rem}'
 	+ '.cr-dev-stats .cr-dev-stat-val{font-size:140%!important}'
 	+ '.cr-tup{display:block;margin-left:0}'
+	+ '.cr-dev-card-v.mono{font-size:10.5px}'
+	+ '}'
+	+ '@media (prefers-color-scheme:dark){'
+	+ '.cr-dev-pill.on{color:#4ade80;background:rgba(34,197,94,.2);border-color:rgba(34,197,94,.42)}'
+	+ '.cr-dev-pill.off{color:#9aa0a6;background:rgba(148,163,184,.16);border-color:rgba(148,163,184,.34)}'
 	+ '}';
 
 function ensureStyle() {
@@ -91,9 +118,13 @@ return view.extend({
 		var tbody = E('tbody', {});
 		var cardsEmpty = E('div', { 'class': 'cr-dev-empty' }, [_('暂无活动设备')]);
 		var cardsEl = E('div', { 'class': 'cr-dev-cards' }, [cardsEmpty]);
-		var hint = E('div', { 'style': 'font-size:85%;opacity:.6;margin:6px 0 10px' },
-			[data.hnat ? _('数据源：conntrack + HNAT 硬件流表双源采样，硬件加速下同样计入')
-			           : _('未检测到 HNAT 硬件流表，当前仅统计软件路径')]);
+		var hiddenEl = E('span', { 'style': 'display:none;color:#b45309' }, ['']);
+		var hint = E('div', { 'style': 'font-size:85%;margin:6px 0 10px;display:flex;flex-wrap:wrap;gap:2px 10px' }, [
+			E('span', { 'style': 'opacity:.6' },
+				[data.hnat ? _('数据源：conntrack + HNAT 硬件流表双源采样，硬件加速下同样计入')
+				           : _('未检测到 HNAT 硬件流表，当前仅统计软件路径')]),
+			hiddenEl
+		]);
 
 		function cell(text, style) {
 			return E('td', { 'class': 'td left', 'style': style || '' }, [text]);
@@ -118,7 +149,7 @@ return view.extend({
 			var upEl = E('span', { 'style': 'color:#e08b2c;font-weight:600' }, ['-']);
 			var tDown = E('span', {}, ['-']);
 			var tUp = E('span', {}, ['-']);
-			var statEl = E('span', { 'class': 'ifacebadge' }, ['-']);
+			var statEl = E('span', { 'class': 'cr-dev-pill on' }, ['-']);
 			var iconWrap = E('span', { 'style': 'vertical-align:middle' });
 
 			var tr = E('tr', { 'class': 'tr' }, [
@@ -135,7 +166,7 @@ return view.extend({
 			/* 移动端卡片 */
 			var cTitle = E('div', { 'class': 'cr-dev-card-title' }, ['-']);
 			var cSub = E('div', { 'class': 'cr-dev-card-sub' }, ['']);
-			var cPill = E('span', { 'class': 'cr-dev-card-pill' }, [_('在线')]);
+			var cPill = E('span', { 'class': 'cr-dev-card-pill cr-dev-pill on' }, [_('在线')]);
 			var cIp = cardLine(_('IP 地址'));
 			var cMac = cardLine(_('MAC'), true);
 			var cDown = cardLine(_('下行'));
@@ -176,6 +207,16 @@ return view.extend({
 			sOnline.val.textContent = String((d && d.online) || 0);
 
 			var list = ((d && d.clients) || []).slice();
+			var recent = keepRecent(list, d && d.ts);
+			list = recent.list;
+			var hid = (d && d.hidden != null) ? (+d.hidden || 0) : recent.hidden;
+			if (hid > 0) {
+				hiddenEl.style.display = '';
+				hiddenEl.textContent = String.format(_('另有 %d 台超过 24 小时未上线的设备已隐藏'), hid);
+			}
+			else {
+				hiddenEl.style.display = 'none';
+			}
 			list.sort(function (a, b) { return (b.up + b.down) - (a.up + a.down); });
 
 			var keys = [];
@@ -195,14 +236,14 @@ return view.extend({
 				r.tDown.textContent = fmtB(c.down_today);
 				r.tUp.textContent = fmtB(c.up_today);
 				r.statEl.textContent = c.online ? _('在线') : _('离线');
-				r.statEl.className = 'label ' + (c.online ? 'success' : 'notice');
+				r.statEl.className = 'cr-dev-pill ' + (c.online ? 'on' : 'off');
 
 				/* 卡片视图 */
 				r.cTitle.textContent = title;
 				r.cTitle.title = title;
 				r.cSub.textContent = (c.host && vname) ? vname : '';
 				r.cPill.textContent = c.online ? _('在线') : _('离线');
-				r.cPill.className = 'cr-dev-card-pill' + (c.online ? '' : ' off');
+				r.cPill.className = 'cr-dev-card-pill cr-dev-pill ' + (c.online ? 'on' : 'off');
 				r.cIp.textContent = c.ip || '-';
 				r.cMac.textContent = c.mac || '-';
 				r.cDown.textContent = fmtRate(c.down);

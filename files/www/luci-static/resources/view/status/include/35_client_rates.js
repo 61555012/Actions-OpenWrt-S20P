@@ -24,7 +24,7 @@ var CSS = ''
 	+ '.cr-hosts-table th.ctr,.cr-hosts-table td.ctr{text-align:center !important}'
 	+ '.cr-hosts-table tr{display:table-row}'
 	+ '.cr-hosts-table th,.cr-hosts-table td{display:table-cell}'
-	+ '.cr-hosts-table tr.off td{opacity:.55}'
+	+ '.cr-hosts-table tr.off td{opacity:.68}'
 	+ '.cr-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#2ecc71;'
 	+ 'box-shadow:0 0 0 2px rgba(46,204,113,.2)}'
 	+ '.cr-dot.off{background:#9aa0a6;box-shadow:none}'
@@ -43,7 +43,7 @@ var CSS = ''
 	+ '.cr-cards{display:none;flex-direction:column;gap:10px}'
 	+ '.cr-card{border:1px solid rgba(127,127,127,.22);border-radius:12px;padding:11px 13px;'
 	+ 'display:flex;flex-direction:column;gap:8px;box-sizing:border-box}'
-	+ '.cr-card.off{opacity:.72}'
+	+ '.cr-card.off{opacity:.86}'
 	+ '.cr-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}'
 	+ '.cr-card-dev{display:flex;align-items:center;gap:8px;min-width:0}'
 	+ '.cr-card-titwrap{min-width:0}'
@@ -52,8 +52,13 @@ var CSS = ''
 	+ '.cr-card-sub{margin-top:2px;font-size:11.5px;opacity:.6;overflow:hidden;text-overflow:ellipsis;'
 	+ 'white-space:nowrap}'
 	+ '.cr-card-pill{flex:0 0 auto;white-space:nowrap;font-size:11.5px;font-weight:600;padding:2px 8px;'
-	+ 'border-radius:999px;color:#22c55e;background:rgba(34,197,94,.16)}'
-	+ '.cr-card-pill.off{color:#9aa0a6;background:rgba(148,163,184,.22)}'
+	+ 'border-radius:999px;border:1px solid transparent;box-sizing:border-box}'
+	+ '.cr-card-pill.on{color:#15803d;background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.38)}'
+	+ '.cr-card-pill.off{color:#6b7280;background:rgba(148,163,184,.14);border-color:rgba(148,163,184,.32)}'
+	+ '@media (prefers-color-scheme:dark){'
+	+ '.cr-card-pill.on{color:#4ade80;background:rgba(34,197,94,.2);border-color:rgba(34,197,94,.42)}'
+	+ '.cr-card-pill.off{color:#9aa0a6;background:rgba(148,163,184,.16);border-color:rgba(148,163,184,.34)}'
+	+ '}'
 	+ '.cr-card-body{display:flex;flex-direction:column;gap:6px}'
 	+ '.cr-card-line{display:flex;align-items:baseline;justify-content:space-between;gap:12px;'
 	+ 'font-size:12.5px;line-height:1.35}'
@@ -94,6 +99,19 @@ function ensureStyle() {
 
 function keyOf(c) {
 	return c.mac || ('ip:' + c.ip);
+}
+
+/* 离线设备只在列表里保留最近 24h 出现过的(与后端 cr-sampler 的 OFFLINE_WIN 一致);
+ * 后端已过滤, 这里兜底, 兼容只更新了前端的旧固件 */
+var OFFLINE_WIN = 86400;
+
+function keepRecent(list, ts) {
+	var nowSec = ts || Math.floor(Date.now() / 1000);
+	return list.filter(function (c) {
+		if (c.online) return true;
+		var ref = c.last_seen || c.first_seen || 0;
+		return (!ref || (nowSec - ref) <= OFFLINE_WIN);
+	});
 }
 
 function cardLine(label, mono) {
@@ -265,7 +283,7 @@ return baseclass.extend({
 
 		var tbody = E('tbody', {});
 		var cardsEl = E('div', { 'class': 'cr-cards' });
-		var empty = E('div', { 'class': 'cr-empty' }, [_('暂无在线设备')]);
+		var empty = E('div', { 'class': 'cr-empty' }, [_('暂无设备')]);
 
 		var node = E('div', {}, [
 			E('div', { 'class': 'cr-hosts-head' }, [
@@ -326,7 +344,7 @@ return baseclass.extend({
 			downV.textContent = fmtRate(wan.down);
 			noteV.textContent = d.hnat ? _('硬件加速已校正') : _('仅软件路径');
 
-			var list = d.clients || [];
+			var list = keepRecent(d.clients || [], d.ts);
 			var seen = {}, i, c, tr;
 
 			for (i = 0; i < list.length; i++) {
