@@ -14,12 +14,12 @@ var CSS = ''
 	+ 'border-radius:8px;background:rgba(127,127,127,.09);font-size:13px;margin:0 0 10px}'
 	+ '.cr-hosts-head .k{opacity:.6;margin-right:6px}'
 	+ '.cr-hosts-head .v{font-weight:600;font-variant-numeric:tabular-nums}'
-	+ '.cr-hosts-table{display:table;width:100%;min-width:60rem;font-size:13px;border-collapse:collapse;table-layout:fixed}'
-	+ '.cr-hosts-table th{font-weight:600;white-space:nowrap;padding:8px 8px !important;text-align:left;'
+	+ '.cr-hosts-table{display:table;width:100%;min-width:66rem;font-size:13px;border-collapse:collapse;table-layout:fixed}'
+	+ '.cr-hosts-table th{font-weight:600;white-space:nowrap;padding:8px 5px !important;text-align:left;'
 	+ 'border-bottom:1px solid rgba(127,127,127,.25);overflow:hidden;text-overflow:ellipsis}'
-	+ '.cr-hosts-table td{padding:7px 8px !important;vertical-align:middle;overflow:hidden;white-space:nowrap;'
+	+ '.cr-hosts-table td{padding:7px 5px !important;vertical-align:middle;overflow:hidden;white-space:nowrap;'
 	+ 'text-overflow:ellipsis;border-bottom:1px solid rgba(127,127,127,.12)}'
-	+ '.cr-hosts-table td.num{text-align:right !important;font-variant-numeric:tabular-nums}'
+	+ '.cr-hosts-table td.num{text-align:right !important;font-variant-numeric:tabular-nums;font-size:11.5px}'
 	+ '.cr-hosts-table th.num{text-align:right !important}'
 	+ '.cr-hosts-table th.ctr,.cr-hosts-table td.ctr{text-align:center !important}'
 	+ '.cr-hosts-table tr{display:table-row}'
@@ -53,14 +53,14 @@ var CSS = ''
 	/* IPv4 / IPv6 叠在同一列: 上 v4 下 v6, 省一列宽度 */
 	+ '.cr-ipwrap{display:flex;flex-direction:column;line-height:1.24;min-width:0}'
 	+ '.cr-ipwrap>span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
-	+ '.cr-ipwrap .cr-v6{font-size:11.5px;opacity:.62}'
+	+ '.cr-ipwrap .cr-v6{font-size:11px;opacity:.66}'
 	/* 连接方式: 短文本整列居中, 与「连接数」数字自然分开, 表头和数据同一中线 */
 	+ '.cr-link{font-size:12.5px}'
-	+ '.cr-td-neg{font-variant-numeric:tabular-nums;line-height:1.2}'
-	+ '.cr-neg{display:flex;flex-direction:column;font-size:12px;white-space:nowrap}'
-	+ '.cr-neg .cr-mhz{font-style:normal;font-size:11px;opacity:.62}'
-	+ '.cr-rssi{font-variant-numeric:tabular-nums;font-size:12.5px}'
-	+ '.cr-hosts-table td.num{font-size:12.5px}'
+	+ '.cr-td-neg{font-variant-numeric:tabular-nums;line-height:1.2;text-align:right !important}'
+	+ '.cr-neg{display:flex;flex-direction:column;align-items:flex-end;font-size:11px;white-space:nowrap}'
+	+ '.cr-neg .cr-mhz{font-style:normal;font-size:10px;opacity:.62}'
+	+ '.cr-rssi{font-variant-numeric:tabular-nums;font-size:12px}'
+	+ 
 	+ '.cr-empty{padding:14px 4px;opacity:.6}'
 	/* ===== 移动端: 卡片视图 (参考 OAF 用户列表的 user-card) ===== */
 	+ '.cr-hosts-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}'
@@ -251,8 +251,8 @@ function newRow(c) {
 		E('td', { 'class': 'num' }, [cl.down]),
 		E('td', { 'class': 'num' }, [cl.conn]),
 		E('td', { 'class': 'ctr' }, [cl.link]),
-		E('td', { 'class': 'cr-td-neg' }, [cl.rx]),
-		E('td', { 'class': 'cr-td-neg' }, [cl.tx]),
+		E('td', { 'class': 'cr-td-neg num' }, [cl.rx]),
+		E('td', { 'class': 'cr-td-neg num' }, [cl.tx]),
 		E('td', { 'class': 'num' }, [cl.rssi])
 	]);
 	tr._cr = cl;
@@ -366,17 +366,17 @@ return baseclass.extend({
 			E('div', { 'class': 'cr-hosts-wrap' }, [
 				E('table', { 'class': 'table cr-hosts-table' }, [
 					E('colgroup', {}, [
-						E('col', { 'style': 'width:4%' }),
-						E('col', { 'style': 'width:13.2%' }),
-						E('col', { 'style': 'width:12.6%' }),
-						E('col', { 'style': 'width:17.6%' }),
-						E('col', { 'style': 'width:9%' }),
-						E('col', { 'style': 'width:9%' }),
-						E('col', { 'style': 'width:5.4%' }),
-						E('col', { 'style': 'width:6.6%' }),
-						E('col', { 'style': 'width:7.9%' }),
-						E('col', { 'style': 'width:7.9%' }),
-						E('col', { 'style': 'width:6.8%' })
+						E('col', { 'style': 'width:3.5%' }),
+						E('col', { 'style': 'width:12.8%' }),
+						E('col', { 'style': 'width:11.2%' }),
+						E('col', { 'style': 'width:22.1%' }),
+						E('col', { 'style': 'width:7.2%' }),
+						E('col', { 'style': 'width:7.2%' }),
+						E('col', { 'style': 'width:7.2%' }),
+						E('col', { 'style': 'width:7.2%' }),
+						E('col', { 'style': 'width:7.2%' }),
+						E('col', { 'style': 'width:7.2%' }),
+						E('col', { 'style': 'width:7.2%' })
 					]),
 					E('thead', {}, [E('tr', { 'class': 'cr-row' }, [
 						E('th', { 'class': 'ctr' }, [_('状态')]),
@@ -387,8 +387,8 @@ return baseclass.extend({
 						E('th', { 'class': 'num' }, [_('下载')]),
 						E('th', { 'class': 'num' }, [_('连接数')]),
 						E('th', { 'class': 'ctr' }, [_('连接方式')]),
-						E('th', {}, [_('接收速率')]),
-						E('th', {}, [_('发送速率')]),
+						E('th', { 'class': 'num' }, [_('接收速率')]),
+						E('th', { 'class': 'num' }, [_('发送速率')]),
 						E('th', { 'class': 'num' }, [_('信号强度')])
 					])]),
 					tbody
