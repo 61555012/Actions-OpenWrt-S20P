@@ -55,12 +55,9 @@ var CSS = ''
 	+ '.cr-dev-card-k{flex:0 0 auto;opacity:.6}'
 	+ '.cr-dev-card-v{min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
 	+ 'font-variant-numeric:tabular-nums}'
-	+ '.cr-dev-card-v.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}'
 	/* 状态列表头居中(cascade.css 里 th:nth-child(8)), 单元格原来带 .td.left 左对齐,
 	 * 两边一个居中一个贴左, 看着永远差半格 → 单元格也居中 */
 	+ '.cr-table-wrap > .cr-dev-table > tbody > tr > td:nth-child(8){text-align:center!important}'
-	/* MAC 与「在线主机」页保持一致: 等宽小字 */
-	+ '.cr-table-wrap > .cr-dev-table > tbody > tr > td:nth-child(3){font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;opacity:.85}'
 	+ '.cr-dev-empty{padding:14px 4px;opacity:.6;text-align:center}'
 	+ '.cr-tup{margin-left:.4em}'
 	+ '@media (max-width:768px){'
@@ -70,7 +67,6 @@ var CSS = ''
 	+ '.cr-dev-stats>div{padding:9px 11px!important;flex:1 1 7rem}'
 	+ '.cr-dev-stats .cr-dev-stat-val{font-size:140%!important}'
 	+ '.cr-tup{display:block;margin-left:0}'
-	+ '.cr-dev-card-v.mono{font-size:10.5px}'
 	+ '}'
 	+ '@media (prefers-color-scheme:dark){'
 	+ '.cr-dev-pill.on{color:#4ade80;background:rgba(34,197,94,.2);border-color:rgba(34,197,94,.42)}'
@@ -135,8 +131,8 @@ return view.extend({
 			return E('td', { 'class': 'td left', 'style': style || '' }, [text]);
 		}
 
-		function cardLine(label, mono) {
-			var v = E('span', { 'class': 'cr-dev-card-v' + (mono ? ' mono' : '') }, ['-']);
+		function cardLine(label) {
+			var v = E('span', { 'class': 'cr-dev-card-v' }, ['-']);
 			return { line: E('div', { 'class': 'cr-dev-card-line' }, [
 				E('span', { 'class': 'cr-dev-card-k' }, [label]), v
 			]), v: v };

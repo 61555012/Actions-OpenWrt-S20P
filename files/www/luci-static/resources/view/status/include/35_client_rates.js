@@ -18,7 +18,7 @@ var CSS = ''
 	+ '.cr-hosts-table th{font-weight:600;white-space:nowrap;padding:8px 8px !important;text-align:left;'
 	+ 'border-bottom:1px solid rgba(127,127,127,.25);overflow:hidden;text-overflow:ellipsis}'
 	+ '.cr-hosts-table td{padding:7px 8px !important;vertical-align:middle;overflow:hidden;white-space:nowrap;'
-	+ 'border-bottom:1px solid rgba(127,127,127,.12)}'
+	+ 'text-overflow:ellipsis;border-bottom:1px solid rgba(127,127,127,.12)}'
 	+ '.cr-hosts-table td.num{text-align:right !important;font-variant-numeric:tabular-nums}'
 	+ '.cr-hosts-table th.num{text-align:right !important}'
 	+ '.cr-hosts-table th.ctr,.cr-hosts-table td.ctr{text-align:center !important}'
@@ -33,9 +33,10 @@ var CSS = ''
 	+ '.cr-hostname .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;min-width:0;max-width:100%}'
 	+ '.cr-hostname .vd{opacity:.55;font-size:88%;margin-left:5px;white-space:nowrap;flex:0 0 auto;'
 	+ 'overflow:hidden;text-overflow:ellipsis;max-width:40%}'
-	/* MAC 与 IPv6 用同一套等宽小字(字号/透明度/字体一致), 区别只在内容长度 */
-	+ '.cr-v6,.cr-mac{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;opacity:.85}'
-	+ '.cr-link{font-size:12px;opacity:.85}'
+	/* MAC / IPv6 与主机名同为正文字体(不再用等宽小字), 三列观感一致 */
+	+ '.cr-mac,.cr-v6{font-family:inherit;font-size:inherit}'
+	/* 连接方式: 短文本整列居中, 与「连接数」数字自然分开, 表头和数据同一中线 */
+	+ '.cr-link{font-size:12.5px}'
 	+ '.cr-rssi{font-variant-numeric:tabular-nums;font-size:12.5px}'
 	+ '.cr-hosts-table td.num{font-size:12.5px}'
 	+ '.cr-empty{padding:14px 4px;opacity:.6}'
@@ -66,13 +67,10 @@ var CSS = ''
 	+ '.cr-card-k{flex:0 0 auto;opacity:.6}'
 	+ '.cr-card-v{min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
 	+ 'font-variant-numeric:tabular-nums}'
-	+ '.cr-card-v.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}'
 	+ '@media (max-width:768px){'
 	+ '.cr-hosts-wrap{display:none!important}'
 	+ '.cr-cards{display:flex}'
 	+ '.cr-hosts-head{gap:10px 16px;padding:9px 11px;font-size:12.5px}'
-	/* 宽 IPv6 在 360px 以下会顶到省略号, 等宽值再收 1px */
-	+ '.cr-card-v.mono{font-size:10.5px}'
 	+ '}';
 
 function fmtRate(v) {
@@ -115,8 +113,8 @@ function keepRecent(list, ts) {
 	});
 }
 
-function cardLine(label, mono) {
-	var v = E('span', { 'class': 'cr-card-v' + (mono ? ' mono' : '') }, ['-']);
+function cardLine(label) {
+	var v = E('span', { 'class': 'cr-card-v' }, ['-']);
 	var line = E('div', { 'class': 'cr-card-line' }, [
 		E('span', { 'class': 'cr-card-k' }, [label]),
 		v
@@ -133,8 +131,8 @@ function renderCell(c) {
 	var cPill = E('span', { 'class': 'cr-card-pill' + (c.online ? '' : ' off') },
 		[c.online ? _('在线') : _('离线')]);
 	var cIp = cardLine(_('IPv4 地址'));
-	var cIp6 = cardLine(_('IPv6 地址'), true);
-	var cMac = cardLine(_('MAC 地址'), true);
+	var cIp6 = cardLine(_('IPv6 地址'));
+	var cMac = cardLine(_('MAC 地址'));
 	var cUp = cardLine(_('上传'));
 	var cDown = cardLine(_('下载'));
 	var cTotal = cardLine(_('总流量'));
@@ -190,7 +188,7 @@ function newRow(c) {
 		E('td', { 'class': 'num' }, [cl.down]),
 		E('td', { 'class': 'num' }, [cl.total]),
 		E('td', { 'class': 'num' }, [cl.conn]),
-		E('td', {}, [cl.link]),
+		E('td', { 'class': 'ctr' }, [cl.link]),
 		E('td', { 'class': 'num' }, [cl.rssi])
 	]);
 	tr._cr = cl;
@@ -303,16 +301,16 @@ return baseclass.extend({
 				E('table', { 'class': 'table cr-hosts-table' }, [
 					E('colgroup', {}, [
 						E('col', { 'style': 'width:4.5%' }),
-						E('col', { 'style': 'width:12.5%' }),
-						E('col', { 'style': 'width:12%' }),
+						E('col', { 'style': 'width:11.5%' }),
+						E('col', { 'style': 'width:13%' }),
 						E('col', { 'style': 'width:10%' }),
-						E('col', { 'style': 'width:16%' }),
-						E('col', { 'style': 'width:7%' }),
-						E('col', { 'style': 'width:7%' }),
-						E('col', { 'style': 'width:7%' }),
-						E('col', { 'style': 'width:6%' }),
-						E('col', { 'style': 'width:8%' }),
-						E('col', { 'style': 'width:10%' })
+						E('col', { 'style': 'width:13.5%' }),
+						E('col', { 'style': 'width:9%' }),
+						E('col', { 'style': 'width:9%' }),
+						E('col', { 'style': 'width:8.5%' }),
+						E('col', { 'style': 'width:5.5%' }),
+						E('col', { 'style': 'width:6.5%' }),
+						E('col', { 'style': 'width:9%' })
 					]),
 					E('thead', {}, [E('tr', { 'class': 'cr-row' }, [
 						E('th', { 'class': 'ctr' }, [_('状态')]),
@@ -324,7 +322,7 @@ return baseclass.extend({
 						E('th', { 'class': 'num' }, [_('下载')]),
 						E('th', { 'class': 'num' }, [_('总流量')]),
 						E('th', { 'class': 'num' }, [_('连接数')]),
-						E('th', {}, [_('连接方式')]),
+						E('th', { 'class': 'ctr' }, [_('连接方式')]),
 						E('th', { 'class': 'num' }, [_('信号强度')])
 					])]),
 					tbody
