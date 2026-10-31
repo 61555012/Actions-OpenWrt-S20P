@@ -14,7 +14,7 @@ var CSS = ''
 	+ 'border-radius:8px;background:rgba(127,127,127,.09);font-size:13px;margin:0 0 10px}'
 	+ '.cr-hosts-head .k{opacity:.6;margin-right:6px}'
 	+ '.cr-hosts-head .v{font-weight:600;font-variant-numeric:tabular-nums}'
-	+ '.cr-hosts-table{display:table;width:100%;min-width:66rem;font-size:13px;border-collapse:collapse;table-layout:fixed}'
+	+ '.cr-hosts-table{display:table;width:100%;min-width:60rem;font-size:13px;border-collapse:collapse;table-layout:fixed}'
 	+ '.cr-hosts-table th{font-weight:600;white-space:nowrap;padding:8px 8px !important;text-align:left;'
 	+ 'border-bottom:1px solid rgba(127,127,127,.25);overflow:hidden;text-overflow:ellipsis}'
 	+ '.cr-hosts-table td{padding:7px 8px !important;vertical-align:middle;overflow:hidden;white-space:nowrap;'
@@ -35,6 +35,10 @@ var CSS = ''
 	+ 'overflow:hidden;text-overflow:ellipsis;max-width:40%}'
 	/* MAC / IPv6 与主机名同为正文字体(不再用等宽小字), 三列观感一致 */
 	+ '.cr-mac,.cr-v6{font-family:inherit;font-size:inherit}'
+	/* IPv4 / IPv6 叠在同一列: 上 v4 下 v6, 省一列宽度 */
+	+ '.cr-ipwrap{display:flex;flex-direction:column;line-height:1.24;min-width:0}'
+	+ '.cr-ipwrap>span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+	+ '.cr-ipwrap .cr-v6{font-size:11.5px;opacity:.62}'
 	/* 连接方式: 短文本整列居中, 与「连接数」数字自然分开, 表头和数据同一中线 */
 	+ '.cr-link{font-size:12.5px}'
 	+ '.cr-td-neg{font-variant-numeric:tabular-nums;line-height:1.2}'
@@ -70,6 +74,10 @@ var CSS = ''
 	+ '.cr-card-k{flex:0 0 auto;opacity:.6}'
 	+ '.cr-card-v{min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
 	+ 'font-variant-numeric:tabular-nums}'
+	+ '.cr-card-line-top{align-items:flex-start}'
+	+ '.cr-card-v2{display:flex;flex-direction:column;align-items:flex-end;line-height:1.3;gap:1px}'
+	+ '.cr-card-v2>span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+	+ '.cr-card-v2 .cr-card-ip6{font-size:11.5px;opacity:.62}'
 	+ '@media (max-width:768px){'
 	+ '.cr-hosts-wrap{display:none!important}'
 	+ '.cr-cards{display:flex}'
@@ -143,6 +151,20 @@ function cardLine(label) {
 	return { line: line, v: v };
 }
 
+/* 卡片里的 IP: IPv4 / IPv6 上下两行, 右对齐同一块 */
+function cardIpLine() {
+	var v4 = E('span', { 'class': 'cr-card-ip4' }, ['-']);
+	var v6 = E('span', { 'class': 'cr-card-ip6' }, ['-']);
+	var box = E('span', { 'class': 'cr-card-v cr-card-v2' }, [v4, v6]);
+	return {
+		line: E('div', { 'class': 'cr-card-line cr-card-line-top' }, [
+			E('span', { 'class': 'cr-card-k' }, [_('IP 地址')]),
+			box
+		]),
+		v4: v4, v6: v6
+	};
+}
+
 function renderCell(c) {
 	var title = c.host || brand.name(c.mac) || c.ip || '-';
 	var vd = (c.host && brand.name(c.mac)) ? brand.name(c.mac) : '';
@@ -151,8 +173,7 @@ function renderCell(c) {
 	var cSub = E('div', { 'class': 'cr-card-sub' }, [vd]);
 	var cPill = E('span', { 'class': 'cr-card-pill' + (c.online ? '' : ' off') },
 		[c.online ? _('在线') : _('离线')]);
-	var cIp = cardLine(_('IPv4 地址'));
-	var cIp6 = cardLine(_('IPv6 地址'));
+	var cIp = cardIpLine();
 	var cMac = cardLine(_('MAC 地址'));
 	var cUp = cardLine(_('上传'));
 	var cDown = cardLine(_('下载'));
@@ -171,10 +192,13 @@ function renderCell(c) {
 			cPill
 		]),
 		E('div', { 'class': 'cr-card-body' }, [
-			cIp.line, cIp6.line, cMac.line, cUp.line, cDown.line, cConn.line,
+			cIp.line, cMac.line, cUp.line, cDown.line, cConn.line,
 			cLink.line, cRx.line, cTx.line, cRssi.line
 		])
 	]);
+
+	var ip4El = E('span', {}, [c.ip || '-']);
+	var ip6El = E('span', { 'class': 'cr-v6', 'title': c.ip6 || '' }, [c.ip6 || '-']);
 
 	return {
 		dot: E('span', { 'class': 'cr-dot' + (c.online ? '' : ' off') }),
@@ -184,8 +208,9 @@ function renderCell(c) {
 			vd ? E('span', { 'class': 'vd' }, [vd]) : ''
 		]),
 		nameEl: nameEl,
-		ip: E('span', {}, [c.ip || '-']),
-		ip6: E('span', { 'class': 'cr-v6', 'title': c.ip6 || '' }, [c.ip6 || '-']),
+		ip: ip4El,
+		ip6: ip6El,
+		ipWrap: E('div', { 'class': 'cr-ipwrap' }, [ip4El, ip6El]),
 		mac: E('span', { 'class': 'cr-mac' }, [c.mac || '-']),
 		up: E('span', {}, ['-']),
 		down: E('span', {}, ['-']),
@@ -194,7 +219,7 @@ function renderCell(c) {
 		link: E('span', { 'class': 'cr-link' }, [c.link || '-']),
 		rx: E('span', { 'class': 'cr-neg' }, [c.link ? (c.rate ? '\u2013' : '-') : '-']),
 		tx: E('span', { 'class': 'cr-neg' }, [c.link ? (c.rate ? '\u2013' : '-') : '-']),
-		card: card, cPill: cPill, cIp: cIp.v, cIp6: cIp6.v, cMac: cMac.v,
+		card: card, cPill: cPill, cIp: cIp.v4, cIp6: cIp.v6, cMac: cMac.v,
 		cUp: cUp.v, cDown: cDown.v, cConn: cConn.v, cLink: cLink.v,
 		cRx: cRx.v, cTx: cTx.v, cRssi: cRssi.v
 	};
@@ -206,8 +231,7 @@ function newRow(c) {
 		E('td', { 'class': 'ctr' }, [cl.dot]),
 		E('td', {}, [cl.host]),
 		E('td', {}, [cl.mac]),
-		E('td', {}, [cl.ip]),
-		E('td', {}, [cl.ip6]),
+		E('td', {}, [cl.ipWrap]),
 		E('td', { 'class': 'num' }, [cl.up]),
 		E('td', { 'class': 'num' }, [cl.down]),
 		E('td', { 'class': 'num' }, [cl.conn]),
@@ -328,13 +352,12 @@ return baseclass.extend({
 				E('table', { 'class': 'table cr-hosts-table' }, [
 					E('colgroup', {}, [
 						E('col', { 'style': 'width:4%' }),
-						E('col', { 'style': 'width:12.9%' }),
+						E('col', { 'style': 'width:13.2%' }),
 						E('col', { 'style': 'width:12.6%' }),
-						E('col', { 'style': 'width:10%' }),
-						E('col', { 'style': 'width:9.4%' }),
-						E('col', { 'style': 'width:8.7%' }),
-						E('col', { 'style': 'width:8.7%' }),
-						E('col', { 'style': 'width:5.5%' }),
+						E('col', { 'style': 'width:17.6%' }),
+						E('col', { 'style': 'width:9%' }),
+						E('col', { 'style': 'width:9%' }),
+						E('col', { 'style': 'width:5.4%' }),
 						E('col', { 'style': 'width:6.6%' }),
 						E('col', { 'style': 'width:7.9%' }),
 						E('col', { 'style': 'width:7.9%' }),
@@ -344,8 +367,7 @@ return baseclass.extend({
 						E('th', { 'class': 'ctr' }, [_('状态')]),
 						E('th', {}, [_('主机名')]),
 						E('th', {}, [_('MAC 地址')]),
-						E('th', {}, [_('IPv4 地址')]),
-						E('th', {}, [_('IPv6 地址')]),
+						E('th', {}, [_('IPv4 / IPv6')]),
 						E('th', { 'class': 'num' }, [_('上传')]),
 						E('th', { 'class': 'num' }, [_('下载')]),
 						E('th', { 'class': 'num' }, [_('连接数')]),
