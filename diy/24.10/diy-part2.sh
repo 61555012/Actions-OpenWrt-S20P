@@ -320,4 +320,14 @@ else
   echo "    [警告] 未找到 argon cascade.css, 跳过"
 fi
 
+echo "==== [diy-part2/24.10] 首页概览去掉「无线」区块 ===="
+# view/status/index.js 用 fs.list() 扫 view/status/include/ 目录生成区块,
+# 文件名即区块; 返回空内容只会留个空标题, 所以直接从 feed 源码删掉该 include。
+WIFI_INC=$(find feeds/luci -path '*/view/status/include/60_wifi.js' -type f 2>/dev/null)
+if [ -n "$WIFI_INC" ]; then
+  echo "$WIFI_INC" | while read -r f; do rm -f "$f"; echo "    已删除: $f"; done
+else
+  echo "    [提示] 未找到 60_wifi.js, 跳过(可能 luci 版本已调整路径)"
+fi
+
 echo "==== [diy-part2/24.10] 完成 ===="
