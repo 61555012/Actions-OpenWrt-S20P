@@ -432,14 +432,81 @@ function flow_id(proto, cip, cport, rip, rport) {
 const RE_CT = /^\s*ipv4\s+\d+\s+(\w+)\s+\d+\s+\d+\s+\w+\s+src=([0-9.]+) dst=([0-9.]+) sport=(\d+) dport=(\d+) packets=\d+ bytes=(\d+).*src=([0-9.]+) dst=([0-9.]+) sport=(\d+) dport=(\d+) packets=\d+ bytes=(\d+)/;
 const PROTO_MAP = { tcp: '6', udp: '17', icmp: '1', sctp: '132' };
 
+/* ---------- IPv6 流量 ----------
+ * 本机 HNAT 只有 IPV4_ 条目(IPv6 不进快通道), 所以 v6 流量全部走 conntrack 软件路径。
+ * 一条 ipv6 连接有两段(去/回), 格式比 ipv4 多 tos=/[UNREPLIED], 且没有固定分隔符,
+ * 按 token 出现顺序解析: 每遇到 src= 开一段, 其后的 dst/sport/dport/bytes 归该段。
+ * 归属: conntrack 行里没有 MAC, 用邻居表维护的 v6pool(地址 -> mac) 反查。
+ */
+function parse_ct6(line) {
+	let toks = split(trim(line), /[ \t]+/);
+	let out = [], cur = null;
+	for (let i = 0; i < length(toks); i++) {
+		let t = toks[i];
+		if (index(t, 'src=') == 0) {
+			cur = { src: substr(t, 4), bytes: 0 };
+			push(out, cur);
+			continue;
+		}
+		if (cur == null) continue;
+		if (index(t, 'dst=') == 0) cur.dst = substr(t, 4);
+		else if (index(t, 'sport=') == 0) cur.sport = substr(t, 6);
+		else if (index(t, 'dport=') == 0) cur.dport = substr(t, 6);
+		else if (index(t, 'bytes=') == 0) cur.bytes = +substr(t, 6);
+	}
+	return out;
+}
+
+/* 增量累加到 cur6[mac] = { up, down }; 基线 id 用 (mac, 对端, 两端端口) 而非地址,
+ * 设备隐私地址轮换时同一条流的累计值不会被重复计入 */
+function sample_ct6(line, cur6, t) {
+	let d = parse_ct6(line);
+	if (length(d) < 2) return;
+	let a1 = expand6(d[0].src), a2 = expand6(d[1].src);
+	let e1 = (a1 != null) ? v6pool[a1] : null;
+	let e2 = (a2 != null) ? v6pool[a2] : null;
+	let mac = null, first = false;
+	if (e1 != null && e1.mac != null) { mac = e1.mac; first = true; }
+	else if (e2 != null && e2.mac != null) { mac = e2.mac; }
+	if (mac == null) return;
+	/* 客户端在发起侧 -> 第一段字节是上行; 客户端在响应侧 -> 反过来 */
+	let up = first ? d[0].bytes : d[1].bytes;
+	let dn = first ? d[1].bytes : d[0].bytes;
+	let peer = first ? a2 : a1;
+	let id = 'c6|' + mac + '|' + peer + '|'
+		+ (first ? d[0].sport : d[1].sport) + '|' + (first ? d[0].dport : d[1].dport);
+	let p = base[id];
+	let du = 0, dd = 0;
+	if (p != null) {
+		du = (up > p.u) ? up - p.u : 0;
+		dd = (dn > p.d) ? dn - p.d : 0;
+	}
+	else if (tick > 1) {
+		/* v6 没有快通道兜底, 短连接(一个 tick 内就结束)只出现一次:
+		 * 若首见只建基线, 这类 flow 会被整条漏掉。启动后头两个 tick 例外
+		 * (conntrack 里已有的老流会一次性全量计入, 造成今日流量尖峰)。 */
+		du = up;
+		dd = dn;
+	}
+	base[id] = { u: up, d: dn, at: t };
+	if (du == 0 && dd == 0) return;
+	let f = cur6[mac];
+	if (f == null) { f = { up: 0, down: 0 }; cur6[mac] = f; }
+	f.up += du; f.down += dd;
+}
+
 /* cur: flowkey -> {up,down,ip,mac}   本次 tick 的增量汇总 */
-function sample_ct(cur, seen, t) {
+function sample_ct(cur, seen, t, cur6) {
 	let txt = null;
 	try { txt = fs.readfile(CT_PATH); } catch (e) { return; }
 	if (txt == null) return;
 	let lines = split(txt, '\n');
 	for (let i = 0; i < length(lines); i++) {
-		if (index(lines[i], 'ipv6') == 0) { touch_v6(lines[i], t); continue; }
+		if (index(lines[i], 'ipv6') == 0) {
+			touch_v6(lines[i], t);
+			if (cur6 != null) sample_ct6(lines[i], cur6, t);
+			continue;
+		}
 		let m = match(lines[i], RE_CT);
 		if (m == null) continue;
 		let proto = PROTO_MAP[m[1]];
@@ -543,9 +610,10 @@ function load_state() {
 		clients[k] = {
 			mac: c.mac, ip: c.ip, host: c.host, ip6: c.ip6,
 			up_today: +c.up_today || 0, down_today: +c.down_today || 0,
+			up6_today: +c.up6_today || 0, down6_today: +c.down6_today || 0,
 			hours: (type(c.hours) == 'object') ? c.hours : {},
 			first_seen: +c.first_seen || now(), last_seen: +c.last_seen || 0,
-			up_rate: 0, down_rate: 0, conn: 0, rssi: null
+			up_rate: 0, down_rate: 0, up6_rate: 0, down6_rate: 0, conn: 0, rssi: null
 		};
 	}
 }
@@ -560,6 +628,7 @@ function save_state() {
 		if (ref_t > 0 && ref_t < cut) continue;
 		out.clients[k] = { mac: c.mac, ip: c.ip, host: c.host, ip6: c.ip6,
 			up_today: c.up_today, down_today: c.down_today,
+			up6_today: c.up6_today, down6_today: c.down6_today,
 			hours: c.hours, first_seen: c.first_seen, last_seen: c.last_seen };
 	}
 	try { fs.mkdir(STATE_DIR, 0755); } catch (e) { }
@@ -598,8 +667,9 @@ function client_for(mac, ip, leases) {
 
 	if (c == null) {
 		c = { mac: mac, ip: ip, host: null, ip6: null, up_today: 0, down_today: 0,
+		      up6_today: 0, down6_today: 0,
 		      hours: {}, first_seen: now(), last_seen: 0,
-		      up_rate: 0, down_rate: 0, conn: 0, rssi: null };
+		      up_rate: 0, down_rate: 0, up6_rate: 0, down6_rate: 0, conn: 0, rssi: null };
 		clients[key] = c;
 	}
 	if (ip != null) c.ip = ip;
@@ -626,8 +696,8 @@ function run() {
 	}
 	if (tick % RSSI_EVERY == 0) { rssi = read_rssi(); links = read_links(); }
 
-	let cur = {}, seen = {};
-	sample_ct(cur, seen, t);
+	let cur = {}, seen = {}, cur6 = {};
+	sample_ct(cur, seen, t, cur6);
 	sample_hnat(cur, seen, t);
 
 	/* 连接数: 本 tick 出现过的流(两源并集)归到设备 */
@@ -664,6 +734,32 @@ function run() {
 		seen_bw[rec.key][1] += f.down;
 	}
 
+	/* v6 流量: 已按 mac 归好, 直接并入设备总量; 单独另记 up6/down6 供「IPv6 行」显示。
+	 * 设备总量(今日/小时桶/WAN 总量)计入 v6, 「今日流量」才是这台机器真实跑的字节数 */
+	let seen_bw6 = {};
+	for (let mac in cur6) {
+		if (mac == LAN_MAC1 || mac == LAN_MAC2) continue;
+		let f = cur6[mac];
+		let c = clients[mac];
+		if (c == null) {
+			c = { mac: mac, ip: null, host: null, ip6: pick6(mac),
+			      up_today: 0, down_today: 0, up6_today: 0, down6_today: 0,
+			      hours: {}, first_seen: t, last_seen: 0,
+			      up_rate: 0, down_rate: 0, up6_rate: 0, down6_rate: 0, conn: 0, rssi: null };
+			clients[mac] = c;
+		}
+		c.up_today += f.up;
+		c.down_today += f.down;
+		c.up6_today += f.up;
+		c.down6_today += f.down;
+		add_hour(c.hours, hh, f.up, f.down);
+		add_hour(wan_hours, hh, f.up, f.down);
+		wan_day_up += f.up;
+		wan_day_down += f.down;
+		c.last_seen = t;
+		seen_bw6[mac] = [f.up, f.down];
+	}
+
 	/* ARP 在册说明近期有 L2 活动: 没流量的设备也建记录(0 速率), 已存在的续期 */
 	for (let ip in arp) {
 		if (ip == ROUTER_IP) continue;
@@ -696,12 +792,17 @@ function run() {
 	for (let k in clients) {
 		let c = clients[k];
 		let s = seen_bw[k] || [0, 0];
+		let s6 = seen_bw6[k] || [0, 0];
 		c.up_rate = c.up_rate * (1 - RATE_ALPHA) + (s[0] / dt) * RATE_ALPHA;
 		c.down_rate = c.down_rate * (1 - RATE_ALPHA) + (s[1] / dt) * RATE_ALPHA;
+		c.up6_rate = c.up6_rate * (1 - RATE_ALPHA) + (s6[0] / dt) * RATE_ALPHA;
+		c.down6_rate = c.down6_rate * (1 - RATE_ALPHA) + (s6[1] / dt) * RATE_ALPHA;
 		if (c.up_rate < 1) c.up_rate = 0;
 		if (c.down_rate < 1) c.down_rate = 0;
+		if (c.up6_rate < 1) c.up6_rate = 0;
+		if (c.down6_rate < 1) c.down6_rate = 0;
 		c.conn = fcount[k] || 0;
-		tot_up += c.up_rate; tot_dn += c.down_rate;
+		tot_up += c.up_rate + c.up6_rate; tot_dn += c.down_rate + c.down6_rate;
 		let on = ((t - c.last_seen) <= ONLINE_WIN);
 		if (on) online++;
 		/* 离线且超过 24h 没出现的设备不再输出:
@@ -715,7 +816,9 @@ function run() {
 		push(list, {
 			mac: c.mac, ip: c.ip, ip6: c.ip6, host: c.host,
 			up: int(c.up_rate), down: int(c.down_rate),
+			up6: int(c.up6_rate), down6: int(c.down6_rate),
 			up_today: int(c.up_today), down_today: int(c.down_today),
+			up6_today: int(c.up6_today), down6_today: int(c.down6_today),
 			hours: ((t - c.last_seen) <= 43200) ? c.hours : {},
 			conn: c.conn, rssi: c.rssi,
 			link: (c.mac != null) ? (links[c.mac] ?? null) : null,
@@ -726,7 +829,7 @@ function run() {
 	}
 	sort(list, function(a, b) {
 		if (a.online != b.online) return a.online ? -1 : 1;
-		return (b.up + b.down) - (a.up + a.down);
+		return (b.up + b.down + b.up6 + b.down6) - (a.up + a.down + a.up6 + a.down6);
 	});
 
 	let up_today = 0, down_today = 0;
@@ -774,7 +877,11 @@ function run() {
 		wan_day_up = 0;
 		wan_day_down = 0;
 		wan_hours = {};
-		for (let k in clients) { clients[k].up_today = 0; clients[k].down_today = 0; clients[k].hours = {}; }
+		for (let k in clients) {
+			clients[k].up_today = 0; clients[k].down_today = 0;
+			clients[k].up6_today = 0; clients[k].down6_today = 0;
+			clients[k].hours = {};
+		}
 	}
 	if (tick % SAVE_EVERY == 0) save_state();
 }

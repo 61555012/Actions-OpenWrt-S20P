@@ -54,6 +54,10 @@ var CSS = ''
 	+ '.cr-ipwrap{display:flex;flex-direction:column;line-height:1.24;min-width:0}'
 	+ '.cr-ipwrap>span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
 	+ '.cr-ipwrap .cr-v6{font-size:11px;opacity:.66}'
+	/* v6 自己的实时速率 + 今日流量: 第三行小字, 叠在 v6 地址下面 */
+	+ '.cr-ipwrap .cr-v6st{font-size:10.5px;opacity:.5;font-variant-numeric:tabular-nums;'
+	+ 'font-feature-settings:tnum}'
+	+ '@media (prefers-color-scheme:dark){.cr-ipwrap .cr-v6st{opacity:.64}}'
 	/* 连接方式: 短文本整列居中, 表头和数据同一中线; 右移 6px 让表头两侧留白均衡
 	   (左邻「连接数」是右对齐数字, 贴得较近) */
 	+ '.cr-link,.cr-lk-in{font-size:12.5px;position:relative;left:6px;display:inline-block}'
@@ -77,6 +81,7 @@ var CSS = ''
 	+ '.cr-neg{font-size:12px}'
 	+ '.cr-neg .cr-mhz{font-size:11px}'
 	+ '.cr-ipwrap .cr-v6{font-size:12px}'
+	+ '.cr-ipwrap .cr-v6st{font-size:11.5px}'
 	+ '}'
 	+ '.cr-empty{padding:14px 4px;opacity:.6}'
 	/* ===== 移动端: 卡片视图 (参考 OAF 用户列表的 user-card) ===== */
@@ -99,6 +104,7 @@ var CSS = ''
 	+ '@media (prefers-color-scheme:dark){'
 	+ '.cr-card-pill.on{color:#4ade80;background:rgba(34,197,94,.2);border-color:rgba(34,197,94,.42)}'
 	+ '.cr-card-pill.off{color:#9aa0a6;background:rgba(148,163,184,.16);border-color:rgba(148,163,184,.34)}'
+	+ '.cr-card-v2 .cr-card-ip6st{opacity:.66}'
 	+ '}'
 	+ '.cr-card-body{display:flex;flex-direction:column;gap:6px}'
 	+ '.cr-card-line{display:flex;align-items:baseline;justify-content:space-between;gap:12px;'
@@ -110,14 +116,45 @@ var CSS = ''
 	+ '.cr-card-v2{display:flex;flex-direction:column;align-items:flex-end;line-height:1.3;gap:1px}'
 	+ '.cr-card-v2>span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
 	+ '.cr-card-v2 .cr-card-ip6{font-size:11.5px;opacity:.62}'
+	+ '.cr-card-v2 .cr-card-ip6st{font-size:11px;opacity:.55;font-variant-numeric:tabular-nums}'
 	+ '@media (max-width:768px){'
 	+ '.cr-hosts-wrap{display:none!important}'
 	+ '.cr-cards{display:flex}'
 	+ '.cr-hosts-head{gap:10px 16px;padding:9px 11px;font-size:12.5px}'
 	+ '}';
 
+/* 速率格式化: 数值大时自动减少小数位 —— 7 个数值列等宽 76px,
+ * "216.33 KiB/s" 会顶到省略号, 而 "216 KiB/s" 正好放得下 */
 function fmtRate(v) {
-	return String.format('%1024.2mB/s', v || 0);
+	v = v || 0;
+	var f = (v >= 102400) ? '%1024.0mB/s' : ((v >= 10240) ? '%1024.1mB/s' : '%1024.2mB/s');
+	return String.format(f, v);
+}
+
+function fmtSize(v) {
+	return String.format('%1024.2mB', v || 0);
+}
+
+/* IPv6 行下面的小字: 实时速率 + 今日流量。
+ * 三行(IPv4 / IPv6 / 计量)统一格式, 没 v6 地址时给占位符, 保证行高一致。
+ * 箭头顺序跟「上传 / 下载」两列一致: ↑ 上行, ↓ 下行; 今日为 0 时省略该段 */
+function v6HasStat(c) {
+	return (c.ip6 != null) &&
+		((c.up6 || 0) + (c.down6 || 0) + (c.up6_today || 0) + (c.down6_today || 0)) > 0;
+}
+
+function v6StatText(c) {
+	if (!c.ip6) return '\u2013';
+	var s = '\u2191\u00a0' + fmtRate(c.up6) + '\u00a0\u00a0\u2193\u00a0' + fmtRate(c.down6);
+	var tot = (c.up6_today || 0) + (c.down6_today || 0);
+	if (tot > 0) s += '\u00a0\u00b7\u00a0' + _('今日') + '\u00a0' + fmtSize(tot);
+	return s;
+}
+
+function v6StatTitle(c) {
+	if (!v6HasStat(c)) return '';
+	return _('IPv6 今日') + ': \u2191\u00a0' + fmtSize(c.up6_today) + '\u00a0/\u00a0\u2193\u00a0' + fmtSize(c.down6_today)
+		+ '\n' + _('实时') + ': \u2191\u00a0' + fmtRate(c.up6) + '\u00a0/\u00a0\u2193\u00a0' + fmtRate(c.down6);
 }
 
 /* 无线协商速率: iwinfo 给的是 1201.0, 取整显示; 2.4G 老模式没有频宽则只有速率。
@@ -134,8 +171,7 @@ function setNegRate(el, r, dir) {
 }
 
 /* 卡片里是单行 label/value, 用这个拼成一整串 */
-function negRateText(r, dir) {
-	if (!r) return '-';
+function negRateText(r, dir) {	if (!r) return '-';
 	var v = (dir == 'rx') ? r.rx : r.tx;
 	var m = (dir == 'rx') ? r.rxm : r.txm;
 	if (v == null) return '-';
@@ -183,17 +219,18 @@ function cardLine(label) {
 	return { line: line, v: v };
 }
 
-/* 卡片里的 IP: IPv4 / IPv6 上下两行, 右对齐同一块 */
+/* 卡片里的 IP: IPv4 / IPv6 / IPv6 计量 三行, 右对齐同一块 */
 function cardIpLine() {
 	var v4 = E('span', { 'class': 'cr-card-ip4' }, ['-']);
 	var v6 = E('span', { 'class': 'cr-card-ip6' }, ['-']);
-	var box = E('span', { 'class': 'cr-card-v cr-card-v2' }, [v4, v6]);
+	var st = E('span', { 'class': 'cr-card-ip6st' }, ['-']);
+	var box = E('span', { 'class': 'cr-card-v cr-card-v2' }, [v4, v6, st]);
 	return {
 		line: E('div', { 'class': 'cr-card-line cr-card-line-top' }, [
 			E('span', { 'class': 'cr-card-k' }, [_('IP 地址')]),
 			box
 		]),
-		v4: v4, v6: v6
+		v4: v4, v6: v6, st: st
 	};
 }
 
@@ -231,6 +268,7 @@ function renderCell(c) {
 
 	var ip4El = E('span', {}, [c.ip || '-']);
 	var ip6El = E('span', { 'class': 'cr-v6', 'title': c.ip6 || '' }, [c.ip6 || '-']);
+	var ip6stEl = E('span', { 'class': 'cr-v6st' }, ['-']);
 
 	return {
 		dot: E('span', { 'class': 'cr-dot' + (c.online ? '' : ' off') }),
@@ -242,7 +280,8 @@ function renderCell(c) {
 		nameEl: nameEl,
 		ip: ip4El,
 		ip6: ip6El,
-		ipWrap: E('div', { 'class': 'cr-ipwrap' }, [ip4El, ip6El]),
+		ip6st: ip6stEl,
+		ipWrap: E('div', { 'class': 'cr-ipwrap' }, [ip4El, ip6El, ip6stEl]),
 		mac: E('span', { 'class': 'cr-mac' }, [c.mac || '-']),
 		up: E('span', {}, ['-']),
 		down: E('span', {}, ['-']),
@@ -251,7 +290,7 @@ function renderCell(c) {
 		link: E('span', { 'class': 'cr-link' }, [c.link || '-']),
 		rx: E('span', { 'class': 'cr-neg' }, [c.link ? (c.rate ? '\u2013' : '-') : '-']),
 		tx: E('span', { 'class': 'cr-neg' }, [c.link ? (c.rate ? '\u2013' : '-') : '-']),
-		card: card, cPill: cPill, cIp: cIp.v4, cIp6: cIp.v6, cMac: cMac.v,
+		card: card, cPill: cPill, cIp: cIp.v4, cIp6: cIp.v6, cIp6st: cIp.st, cMac: cMac.v,
 		cUp: cUp.v, cDown: cDown.v, cConn: cConn.v, cLink: cLink.v,
 		cRx: cRx.v, cTx: cTx.v, cRssi: cRssi.v
 	};
@@ -287,6 +326,8 @@ function fill(tr, c) {
 	cl.ip.textContent = c.ip || '-';
 	cl.ip6.textContent = c.ip6 || '-';
 	cl.ip6.title = c.ip6 || '';
+	cl.ip6st.textContent = v6StatText(c);
+	cl.ip6st.title = v6StatTitle(c);
 	cl.mac.textContent = c.mac || '-';
 	cl.up.textContent = fmtRate(c.up);
 	cl.down.textContent = fmtRate(c.down);
@@ -315,6 +356,8 @@ function fill(tr, c) {
 	cl.cIp.textContent = c.ip || '-';
 	cl.cIp6.textContent = c.ip6 || '-';
 	cl.cIp6.title = c.ip6 || '';
+	cl.cIp6st.textContent = v6StatText(c);
+	cl.cIp6st.title = v6StatTitle(c);
 	cl.cMac.textContent = c.mac || '-';
 	cl.cUp.textContent = fmtRate(c.up);
 	cl.cDown.textContent = fmtRate(c.down);

@@ -33,9 +33,12 @@ files/                                   # 公共文件, 构建时合并进固�
   - 默认值：登录页样式 `居中卡片(centered)`、壁纸来源 `Bing`（同时改 `/etc/config/argon` 与 `uci-defaults`）。
   - 主题 `cascade.css` 在构建时追加 client-rates 的自定义样式（防火墙区域表、设备流量表列对齐、首页端口状态卡片尺寸），带 `==== client-rates:` 标记幂等。
 - `files/` 中的 `client-rates` 页面脚本（设备流量表格 `cr-dev-table` + 窄屏横向滚动）与上面的 CSS 配套。
-- `files/.../status/include/60_wifi.js` 覆盖 LuCI 自带同名文件：首页「无线」区块只保留接口信息框，
-  去掉下面的「已连接站点」表（站点信息统一在「在线主机」里看，含连接方式 / 协商速率）。
+- 首页「无线」区块整块移除：LuCI 的 `view/status/index.js` 用 `fs.list()` 扫 `view/status/include/`
+  生成区块（容器在 load 阶段就建好），所以构建时直接从 feed 源码删掉 `60_wifi.js`，而不是覆盖成空。
+  无线详情仍在「网络 → 无线」页。
 - 「在线主机」「设备流量」列表只保留**在线 + 最近 24 小时内出现过的离线设备**（`cr-sampler.uc` 的 `OFFLINE_WIN`，前端按 `last_seen`/`first_seen` 兜底），更早的设备不再输出，避免设备多时列表过长；状态胶囊在线为绿、离线为中性灰。
+- 「在线主机」的 IP 列把 IPv4 / IPv6 叠在一格：上面 IPv4、中间 IPv6、最下面一行小字是**该设备的 IPv6 实时上下行速率与今日 IPv6 流量**。
+  IPv6 流量由 `cr-sampler.uc` 单独采样（MT7986 的 HNAT 只有 `IPV4_` 条目，IPv6 全部走 conntrack 软件路径，按邻居表地址反查 MAC 归属），设备「今日流量」仍为 v4+v6 合计。
 - 24.10 的插件集与 25.12 相同，额外增加 `wrtbwmon`；并在编译前强校验闭源 WiFi (`kmod-mt_wifi`) 与 MTK 硬件加速 (`kmod-mediatek_hnat` / `kmod-warp`) 已启用。
 
 ## Usage
