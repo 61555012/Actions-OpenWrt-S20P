@@ -22,6 +22,10 @@ var CSS = ''
 	+ '.cr-hosts-table td.num{text-align:right !important;font-variant-numeric:tabular-nums;font-size:11.5px}'
 	+ '.cr-hosts-table th.num{text-align:right !important}'
 	+ '.cr-hosts-table th.ctr,.cr-hosts-table td.ctr{text-align:center !important}'
+	/* 「连接方式」表头会被 alignLinkCol 向右平移, 字比数据宽, 平移后必然超出 6% 的单元格。
+	   其他列的表头不偏移, 保留 overflow:hidden 防止长文字顶到隔壁; 只有 ctr 列放开,
+	   否则最后一个字会被硬裁(实测「连接方式」的「式」只剩半个) */
+	+ '.cr-hosts-table th.ctr{overflow:visible;text-overflow:clip}'
 	+ '.cr-hosts-table tr{display:table-row}'
 	+ '.cr-hosts-table th,.cr-hosts-table td{display:table-cell}'
 	/* argon 在 <1100px 把 .table 改成 block、.tr 改成 flex, 表头与数据各算各的列宽;
@@ -247,7 +251,16 @@ function alignLinkCol(table, links) {
 	var nat = (lr.left + lr.width / 2) - cur;        // 偏移为 0 时的自然中心
 	var want = Math.round((aRight + bLeft) / 2 - nat);
 	if (want < -8) want = -8;                        // 量歪了也不至于把标签甩出本列
+	/* 表头「连接方式」比数据「2.4G」宽得多, 按数据算出的中点会让表头右边缘顶到
+	   「接收速率」的数字上。这里按表头实际宽度再收一次上限, 保证它只占用中间的空档 */
+	var thl = table.querySelector('th.ctr .cr-lk-in');
+	var thw = thl ? thl.getBoundingClientRect().width : 0;
+	if (thw > 0) {
+		var lim = Math.round(bLeft - 2 - thw / 2 - nat);
+		if (want > lim) want = lim;
+	}
 	if (want > 56) want = 56;
+	if (want < -8) want = -8;
 	if (Math.abs(want - cur) < 2) return;            // 1px 抖动不重设, 免得每秒微跳
 	table.style.setProperty('--cr-lk-shift', want + 'px');
 }
@@ -539,14 +552,14 @@ return baseclass.extend({
 				E('table', { 'class': 'table cr-hosts-table' }, [
 					E('colgroup', {}, [
 						E('col', { 'style': 'width:3.6%' }),
-						E('col', { 'style': 'width:10.8%' }),
+						E('col', { 'style': 'width:9.8%' }),
 						E('col', { 'style': 'width:11.2%' }),
 						E('col', { 'style': 'width:22.4%' }),
 						E('col', { 'style': 'width:7.2%' }),
 						E('col', { 'style': 'width:7.2%' }),
 						E('col', { 'style': 'width:4.8%' }),
 						E('col', { 'style': 'width:6%' }),
-						E('col', { 'style': 'width:6%' }),
+						E('col', { 'style': 'width:7%' }),
 						E('col', { 'style': 'width:7.2%' }),
 						E('col', { 'style': 'width:7.2%' }),
 						E('col', { 'style': 'width:6.4%' })
