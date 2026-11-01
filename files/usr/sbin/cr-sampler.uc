@@ -800,7 +800,7 @@ function run() {
 		c.rssi = (rssi[c.mac] != null) ? rssi[c.mac] : null;
 	}
 
-	let tot_up = 0, tot_dn = 0;
+	let tot_up = 0, tot_dn = 0, tot_up6 = 0, tot_dn6 = 0;
 	let list = [], online = 0, hidden = 0;
 	for (let k in clients) {
 		let c = clients[k];
@@ -817,6 +817,7 @@ function run() {
 		c.conn = fcount[k] || 0;
 		c.conn6 = fcount6[k] || 0;
 		tot_up += c.up_rate + c.up6_rate; tot_dn += c.down_rate + c.down6_rate;
+		tot_up6 += c.up6_rate; tot_dn6 += c.down6_rate;
 		let on = ((t - c.last_seen) <= ONLINE_WIN);
 		if (on) online++;
 		/* 离线且超过 24h 没出现的设备不再输出:
@@ -846,8 +847,13 @@ function run() {
 		return (b.up + b.down + b.up6 + b.down6) - (a.up + a.down + a.up6 + a.down6);
 	});
 
-	let up_today = 0, down_today = 0;
-	for (let k in clients) { up_today += clients[k].up_today; down_today += clients[k].down_today; }
+	/* 今日总量: v4+v6 合计(设备行也是这个口径); 另给 v6 分量,
+	 * 前端用「总量 − v6」得到 v4, 三个数字才能互相自洽 */
+	let up_today = 0, down_today = 0, up6_today = 0, down6_today = 0;
+	for (let k in clients) {
+		up_today += clients[k].up_today; down_today += clients[k].down_today;
+		up6_today += clients[k].up6_today; down6_today += clients[k].down6_today;
+	}
 
 	/* 最近 30 天每日总量(archive) + 今天 */
 	let daily = [];
@@ -864,7 +870,9 @@ function run() {
 	let out = {
 		ts: t, day: day, interval: dt, hnat: hnat_ok, lan: LAN,
 		wan: { up: int(tot_up), down: int(tot_dn), up_today: int(up_today),
-		       down_today: int(down_today), hours: wan_hours, daily: daily },
+		       down_today: int(down_today), hours: wan_hours, daily: daily,
+		       up6: int(tot_up6), down6: int(tot_dn6),
+		       up6_today: int(up6_today), down6_today: int(down6_today) },
 		sec: { up: int(tick_up), down: int(tick_dn) },
 		online: online, total: length(list), hidden: hidden,
 		clients: slice(list, 0, 128)

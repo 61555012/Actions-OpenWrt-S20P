@@ -112,8 +112,13 @@ var CSS = ''
 	+ '.cr-table-wrap > .cr-dev-table th:nth-child(9){text-align:center!important}'
 	+ '.cr-table-wrap > .cr-dev-table > tbody > tr > td:nth-child(9){text-align:center!important}'
 	+ '.cr-dev-empty{padding:14px 4px;opacity:.6;text-align:center}'
-	+ '.cr-tup{margin-left:.4em}'
+	+ '.cr-tup{margin-left:.55em}'
 	+ '.cr-legend{font-size:78%;opacity:.5;margin-left:.2em}'
+	/* 统计卡两行: 上行 IPv4(继承 170% 字号), 下行 IPv6(.62em 淡色)。
+	 * 用 em 而非 px, 手机端 .cr-dev-stats 把字号压到 140% 时能跟着缩 */
+	+ '.cr-sv4{display:block;line-height:1.2}'
+	+ '.cr-sv6{display:block;font-size:.62em;font-weight:400;opacity:.6;line-height:1.3;'
+	+ 'font-variant-numeric:tabular-nums}'
 	/* 2K/4K 下所有列按比例一起拉宽, 数值离表头太远显得散 —— 与「在线主机」页同口径:
 	 * 整块限宽 1800px(左对齐), 超过 2000px 再把字号提一档, 让密度跟着宽度放大 */
 	+ '.cr-dev-box{max-width:1800px}'
@@ -135,6 +140,7 @@ var CSS = ''
 	+ '.cr-dev-pill.off{color:#9aa0a6;background:rgba(148,163,184,.16);border-color:rgba(148,163,184,.34)}'
 	+ '.cr-dv .cr-dv6{opacity:.7}'
 	+ '.cr-dip .cr-dv6{opacity:.72}'
+	+ '.cr-sv6{opacity:.72}'
 	+ '}';
 
 function ensureStyle() {
@@ -147,8 +153,14 @@ function ensureStyle() {
 }
 
 function stat(label, color) {
+	/* 两行: 上 IPv4(主, 继承卡片字号), 下 IPv6(.62em 淡色)。
+	 * 子元素用 em 而不是固定 px —— 手机上 .cr-dev-stats 会把字号压到 140%,
+	 * em 才能跟着一起缩 */
+	var v4 = E('span', { 'class': 'cr-sv4' }, ['-']);
+	var v6 = E('span', { 'class': 'cr-sv6' }, ['-']);
 	var val = E('div', { 'class': 'cr-dev-stat-val',
-		'style': 'font-size:170%;font-weight:600;line-height:1.25' + (color ? ';color:' + color : '') }, ['-']);
+		'style': 'font-size:170%;font-weight:600;line-height:1.2' + (color ? ';color:' + color : '') },
+		[v4, v6]);
 	var box = E('div', {
 		// flex-basis 用 rem、min-width:0 + border-box，4 张卡片才能等分且不溢出容器
 		'style': 'flex:1 1 8rem;min-width:0;box-sizing:border-box;padding:12px 14px;border:1px solid rgba(128,128,128,.22);border-radius:10px;background:rgba(128,128,128,.04)'
@@ -156,7 +168,7 @@ function stat(label, color) {
 		E('div', { 'style': 'font-size:85%;opacity:.65;margin-bottom:4px' }, [label]),
 		val
 	]);
-	return { box: box, val: val };
+	return { box: box, val: val, v4: v4, v6: v6 };
 }
 
 return view.extend({
@@ -173,12 +185,20 @@ return view.extend({
 		var sUp = stat(_('实时上行'), '#e08b2c');
 		var sToday = stat(_('今日总流量'));
 		var sOnline = stat(_('在线设备'));
-		/* 今日流量拆成两段: 桌面同行, 手机上各占一行(避免「↑」被挤到行尾) */
+		/* 今日流量每行是「↓ 下行 + ↑ 上行」两段: 桌面同行, 手机上 ↑ 换到第二行,
+		 * 否则「↑」会被挤到卡片边缘 */
 		var tdnEl = E('span', { 'class': 'cr-tdn' }, ['-']);
 		var tupEl = E('span', { 'class': 'cr-tup' }, ['-']);
-		while (sToday.val.firstChild) sToday.val.removeChild(sToday.val.firstChild);
-		sToday.val.appendChild(tdnEl);
-		sToday.val.appendChild(tupEl);
+		var tdn6El = E('span', { 'class': 'cr-tdn' }, ['-']);
+		var tup6El = E('span', { 'class': 'cr-tup' }, ['-']);
+		while (sToday.v4.firstChild) sToday.v4.removeChild(sToday.v4.firstChild);
+		sToday.v4.appendChild(tdnEl);
+		sToday.v4.appendChild(tupEl);
+		while (sToday.v6.firstChild) sToday.v6.removeChild(sToday.v6.firstChild);
+		sToday.v6.appendChild(tdn6El);
+		sToday.v6.appendChild(tup6El);
+		/* 在线设备是一台数一台, 没有 v4/v6 之分 */
+		sOnline.v6.style.display = 'none';
 
 		var tbody = E('tbody', {});
 		var cardsEmpty = E('div', { 'class': 'cr-dev-empty' }, [_('暂无活动设备')]);
@@ -188,7 +208,7 @@ return view.extend({
 			E('span', { 'style': 'opacity:.6' },
 				[data.hnat ? _('数据源：conntrack + HNAT 硬件流表双源采样，硬件加速下同样计入')
 				           : _('未检测到 HNAT 硬件流表，当前仅统计软件路径')]),
-			E('span', { 'class': 'cr-legend' }, [_('数值与连接数均为两行：上 IPv4、下 IPv6')]),
+			E('span', { 'class': 'cr-legend' }, [_('统计卡与表格数值均为两行：上 IPv4、下 IPv6')]),
 			hiddenEl
 		]);
 
@@ -297,11 +317,29 @@ return view.extend({
 
 		function update(d) {
 			var wan = (d && d.wan) || {};
-			sDown.val.textContent = fmtRate(wan.down);
-			sUp.val.textContent = fmtRate(wan.up);
-			tdnEl.textContent = '↓ ' + fmtB(wan.down_today);
-			tupEl.textContent = '↑ ' + fmtB(wan.up_today);
-			sOnline.val.textContent = String((d && d.online) || 0);
+			/* 后端 wan.up/down/up_today/down_today 都是 v4+v6 合计,
+			 * 单独给了 v6 分量 → v4 = 总量 − v6, 三个数字互相自洽 */
+			var u6 = wan.up6 || 0, dn6 = wan.down6 || 0;
+			var tu6 = wan.up6_today || 0, td6 = wan.down6_today || 0;
+			var u4 = Math.max(0, (wan.up || 0) - u6);
+			var dn4 = Math.max(0, (wan.down || 0) - dn6);
+			var tu4 = Math.max(0, (wan.up_today || 0) - tu6);
+			var td4 = Math.max(0, (wan.down_today || 0) - td6);
+			var hasV6 = (u6 + dn6 + tu6 + td6) > 0;
+
+			sDown.v4.textContent = fmtRate(dn4);
+			sDown.v6.textContent = fmtRate(dn6);
+			sUp.v4.textContent = fmtRate(u4);
+			sUp.v6.textContent = fmtRate(u6);
+			tdnEl.textContent = '↓ ' + fmtB(td4);
+			tupEl.textContent = '↑ ' + fmtB(tu4);
+			tdn6El.textContent = '↓ ' + fmtB(td6);
+			tup6El.textContent = '↑ ' + fmtB(tu6);
+			/* 纯 v4 网络下不显示一行恒为 0 的 IPv6 */
+			[sDown, sUp, sToday].forEach(function (s) {
+				s.v6.style.display = hasV6 ? '' : 'none';
+			});
+			sOnline.v4.textContent = String((d && d.online) || 0);
 
 			var list = ((d && d.clients) || []).slice();
 			var recent = keepRecent(list, d && d.ts);
