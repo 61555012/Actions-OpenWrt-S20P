@@ -268,6 +268,8 @@ function read_leases() {
  *   conntrack ipv6 行 -> 真正在收发流量的地址, 用来刷新活跃时间
  */
 let v6pool = {};        // 归一化地址 -> { disp, mac, t, rank, stateful }
+let v6pfx = {};         // LAN 侧 /64 前缀 -> true, 用来判断 HNAT 表项里哪一侧是客户端
+let v6learn = {};       // 归一化地址 -> { mac, t }, HNAT 学到的归属(邻居表里没有的临时地址)
 
 const RE_V6CH = /[0-9a-fA-F:]/;
 
@@ -311,6 +313,14 @@ function expand6(s) {
 		push(out, substr(seg, j));
 	}
 	return join(':', out);
+}
+
+/* 取 /64 前缀(前 4 段), 用于判断一个地址是不是本 LAN 段的 */
+function pfx64(a) {
+	if (a == null) return null;
+	let g = split(a, ':');
+	if (length(g) < 4) return null;
+	return join(':', [g[0], g[1], g[2], g[3]]);
 }
 
 /* 递归收集 JSON 里所有 v6 形态的字符串/键 */
@@ -385,6 +395,33 @@ function read_neigh6(t, dhcp6) {
 	}
 }
 
+/* LAN 段前缀表: br-lan 自己的地址 + 地址池里的客户端地址, 两者的 /64 都是内网段。
+ * HNAT 的 v6 表项是纯路由(没有 NAT 段), 只能靠"哪一侧落在内网前缀里"判断客户端是哪一侧,
+ * 上行的 smac 是路由器自己、dmac 是上游下一跳, 都不能当客户端 MAC 用。 */
+function read_lan6pfx() {
+	let txt = null;
+	try {
+		let p = fs.popen('/sbin/ip -6 addr show dev br-lan 2>/dev/null');
+		if (p == null) return;
+		txt = p.read('all');
+		p.close();
+	} catch (e) { return; }
+	if (txt != null) {
+		let lines = split(txt, '\n');
+		for (let i = 0; i < length(lines); i++) {
+			let m = match(trim(lines[i]), /^inet6 ([0-9a-fA-F:]+)/);
+			if (m == null) continue;
+			let a = expand6(m[1]);
+			if (a == null || v6_rank(a) < 2) continue;      // 跳过 fe80
+			v6pfx[pfx64(a)] = true;
+		}
+	}
+	for (let a in v6pool) {
+		let e = v6pool[a];
+		if (e.mac != null) v6pfx[pfx64(a)] = true;
+	}
+}
+
 /* conntrack 里出现 = 真正在用, 刷新活跃时间 */
 function touch_v6(line, t) {
 	let pos = 0;
@@ -433,10 +470,12 @@ const RE_CT = /^\s*ipv4\s+\d+\s+(\w+)\s+\d+\s+\d+\s+\w+\s+src=([0-9.]+) dst=([0-
 const PROTO_MAP = { tcp: '6', udp: '17', icmp: '1', sctp: '132' };
 
 /* ---------- IPv6 流量 ----------
- * 本机 HNAT 只有 IPV4_ 条目(IPv6 不进快通道), 所以 v6 流量全部走 conntrack 软件路径。
- * 一条 ipv6 连接有两段(去/回), 格式比 ipv4 多 tos=/[UNREPLIED], 且没有固定分隔符,
+ * 两个源: conntrack(软件路径) + HNAT 的 IPV6_5T_ROUTE 条目(硬件快通道)。
+ * **两者必须都读**: 实测一条 3MB 的 v6 下载, conntrack 只记到 44KB(握手+未卸载的那几包),
+ * 卸载后的字节全在 HNAT 表项的 bytes= 计数里; 只读 conntrack 会少算 95% 以上。
+ * 一条 ipv6 conntrack 记录有两段(去/回), 格式比 ipv4 多 tos=/[UNREPLIED], 且没有固定分隔符,
  * 按 token 出现顺序解析: 每遇到 src= 开一段, 其后的 dst/sport/dport/bytes 归该段。
- * 归属: conntrack 行里没有 MAC, 用邻居表维护的 v6pool(地址 -> mac) 反查。
+ * 归属: conntrack 行里没有 MAC, 用邻居表维护的 v6pool(地址 -> mac) 反查; HNAT 行同理。
  */
 function parse_ct6(line) {
 	let toks = split(trim(line), /[ \t]+/);
@@ -537,9 +576,101 @@ function sample_ct(cur, seen, t, cur6, seen6) {
 }
 
 const RE_TUPLE = /SIP=([0-9.]+)\(sp=([0-9]+)\)->DIP=([0-9.]+)\(dp=([0-9]+)\)=>NSIP=([0-9.]+)\(sp=([0-9]+)\)->NDIP=([0-9.]+)\(dp=([0-9]+)\)/;
+/* IPv6 是纯路由(IPV6_5T_ROUTE), 没有 =>NSIP 这段 NAT 信息 */
+const RE_TUPLE6 = /SIP=([0-9a-fA-F:]+)\(sp=([0-9]+)\)->DIP=([0-9a-fA-F:]+)\(dp=([0-9]+)\)/;
 const RE_MAC = /^([0-9a-fA-F:]+)->([0-9a-fA-F:]+)$/;
 
-function sample_hnat(cur, seen, t) {
+/* HNAT 里的 v6 地址是「4 组 8 位十六进制」: 24098a20:5263cab4:dc6b16e2:14204c91
+ * 先拼回 32 位再切成 8 组, 最后交给 expand6 归一化(去前导零/小写),
+ * 才能和 v6pool(邻居表建的地址 -> mac)的 key 对上 */
+function hex32(s) {
+	let parts = split(s, ':');
+	let h = '';
+	for (let i = 0; i < length(parts); i++) h += parts[i];
+	if (length(h) != 32) return null;
+	let g = [];
+	for (let i = 0; i < 32; i += 4) push(g, substr(h, i, 4));
+	return expand6(join(':', g));
+}
+
+/* 与 IPv4 同思路: 逐「源条目 + 槽位号」求增量, 避免槽位回收导致同一累计值被反复计入。
+ * 归属: 先按 /64 前缀定位客户端是哪一侧, 再取 MAC
+ *   v6pool(邻居表/租约) -> v6learn(HNAT 学到的) -> 下行表项的 dmac
+ * 后两者才能把「邻居表里没有的临时地址」统计进来: Windows/macOS 会轮换隐私地址,
+ * 邻居表经常只留其中一两个, 只靠地址反查会漏掉一半流量
+ * (实测 48MB 只统计到 21MB, 差的就是用完就丢的临时地址)。 */
+function sample_hnat6(line, cur6, t) {
+	if (cur6 == null) return;
+	let b = match(line, /^bytes=([0-9]+)/);
+	if (b == null) return;
+	let bytes = +b[1];
+	let p = split(line, '|');
+	let proto = field(p, 'prot');
+	let idx = field(p, 'index');
+	let tpl = match(line, RE_TUPLE6);
+	if (tpl == null || proto == null) return;
+	let a1 = hex32(tpl[1]), a2 = hex32(tpl[3]);
+	if (a1 == null || a2 == null) return;
+
+	/* 哪一侧是内网客户端: 先用 /64 前缀判断, 网络侧地址不会落在 LAN 前缀里。
+	 * 判不出来(客户端刚换地址、前缀表还没建立)再退回地址池反查。 */
+	let c6 = null, up = false;
+	let l1 = (v6pfx[pfx64(a1)] == true), l2 = (v6pfx[pfx64(a2)] == true);
+	if (l1 && !l2) { c6 = a1; up = true; }
+	else if (l2 && !l1) { c6 = a2; up = false; }
+	if (c6 == null) {
+		let e1 = v6pool[a1], e2 = v6pool[a2];
+		if (e1 != null && e1.mac != null) { c6 = a1; up = true; }
+		else if (e2 != null && e2.mac != null) { c6 = a2; up = false; }
+		else if (v6learn[a1] != null) { c6 = a1; up = true; }
+		else if (v6learn[a2] != null) { c6 = a2; up = false; }
+		else return;
+	}
+
+	let smac = null, dmac = null;
+	let macf = field(p, 'smac');
+	if (macf != null) {
+		let mm = match(macf, RE_MAC);
+		if (mm != null) { smac = lc(mm[1]); dmac = lc(mm[2]); }
+	}
+	if (smac == '00:00:00:00:00:00') smac = null;
+	if (dmac == '00:00:00:00:00:00') dmac = null;
+
+	let mac = null;
+	let pe = v6pool[c6];
+	if (pe != null && pe.mac != null) mac = pe.mac;
+	if (mac == null && v6learn[c6] != null) mac = v6learn[c6].mac;
+	if (mac == null) {
+		/* 只有下行表项的 dmac 才是客户端网卡; 上行表项的 dmac 是上游下一跳, 学了会造出假设备 */
+		if (!up && dmac != null && dmac != LAN_MAC1 && dmac != LAN_MAC2) mac = dmac;
+		else return;
+	}
+	if (mac == LAN_MAC1 || mac == LAN_MAC2) return;
+
+	/* 「地址 -> MAC」学习缓存: 邻居表里没有的临时隐私地址靠它归位,
+	 * 也让同一个流的上行条目(地址相同、表项里没有客户端 MAC)能算进来 */
+	let le = v6learn[c6];
+	if (le == null || le.mac != mac) v6learn[c6] = { mac: mac, t: t };
+	else le.t = t;
+
+	/* 客户端在 SIP -> 这条计上行; 在 DIP -> 计下行。key 用「槽位号 + 客户端 + 对端」 */
+	let ra = up ? a2 : a1, rp = up ? tpl[4] : tpl[2];
+	let key = 'h6|' + (idx != null ? idx : '?') + '|' + mac + '|' + ra + '|' + rp;
+	let pr = base[key];
+	let d = 0;
+	if (pr != null) d = (bytes > pr.b) ? bytes - pr.b : 0;
+	/* 首见只建基线, 不把 bytes 全量计入: HNAT 槽位会被复用, 新表项一出现就可能带着
+	 * 上一条流的旧累计值(实测新条目 45KB 而实际只下了 3.9KB), 全量计入会造成数倍虚高。
+	 * 代价是流建立后第一个 tick 的字节不算, 与 IPv4 路径行为一致。
+	 * 卸载前的那几包 conntrack 已经记过, 短流不会整条丢失。 */
+	base[key] = { b: bytes, at: t };
+	if (d == 0) return;
+	let f = cur6[mac];
+	if (f == null) { f = { up: 0, down: 0 }; cur6[mac] = f; }
+	if (up) f.up += d; else f.down += d;
+}
+
+function sample_hnat(cur, seen, t, cur6) {
 	let txt = null;
 	try { txt = fs.readfile(HNAT_PATH); hnat_ok = true; }
 	catch (e) { hnat_ok = false; return; }
@@ -548,7 +679,9 @@ function sample_hnat(cur, seen, t) {
 	let lines = split(txt, '\n');
 	for (let i = 0; i < length(lines); i++) {
 		let line = lines[i];
-		if (!length(line) || index(line, 'IPV4_') < 0) continue;
+		if (!length(line)) continue;
+		if (index(line, 'IPV6_') >= 0) { sample_hnat6(line, cur6, t); continue; }
+		if (index(line, 'IPV4_') < 0) continue;
 		let b = match(line, /^bytes=([0-9]+)/);
 		if (b == null) continue;
 		let bytes = +b[1];
@@ -696,12 +829,15 @@ function run() {
 		read_neigh6(t, read_dhcpv6());
 		for (let a in v6pool)
 			if ((t - v6pool[a].t) > V6_TTL) delete v6pool[a];
+		read_lan6pfx();
+		for (let a in v6learn)
+			if ((t - v6learn[a].t) > V6_TTL) delete v6learn[a];
 	}
 	if (tick % RSSI_EVERY == 0) { rssi = read_rssi(); links = read_links(); }
 
 	let cur = {}, seen = {}, cur6 = {}, seen6 = {};
 	sample_ct(cur, seen, t, cur6, seen6);
-	sample_hnat(cur, seen, t);
+	sample_hnat(cur, seen, t, cur6);
 
 	/* 连接数: 本 tick 出现过的流(两源并集)归到设备 */
 	let fcount = {};

@@ -95,16 +95,14 @@ var CSS = ''
 	+ '.cr-dev-card-k{flex:0 0 auto;opacity:.6}'
 	+ '.cr-dev-card-v{min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
 	+ 'font-variant-numeric:tabular-nums}'
-	/* 数值列两行: 上 IPv4, 下 IPv6(淡色小字)。opacity 只压第二行,
-	 * 父级的下行蓝 / 上行橙仍保留 —— 一眼能看出是同一个指标的两条路径 */
+	/* 数值列两行: 上 IPv4, 下 IPv6。两行字号/字重/颜色完全一致,
+	 * 父级给的下行蓝 / 上行橙两行一起继承 */
 	+ '.cr-dv{display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.26;'
 	+ 'font-variant-numeric:tabular-nums;vertical-align:middle;max-width:100%;min-width:0}'
 	+ '.cr-dv>span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
-	+ '.cr-dv .cr-dv6{font-size:11px;opacity:.55;font-weight:400}'
 	+ '.cr-dip{display:inline-flex;flex-direction:column;line-height:1.26;vertical-align:middle;'
 	+ 'min-width:0;max-width:100%}'
 	+ '.cr-dip>span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
-	+ '.cr-dip .cr-dv6{font-size:11px;opacity:.6}'
 	/* 状态列表头居中(cascade.css 里 th:nth-child(8)), 单元格原来带 .td.left 左对齐,
 	 * 两边一个居中一个贴左, 看着永远差半格 → 单元格也居中。
 	 * 新增「连接数」列后状态列从第 8 列变成第 9 列, 一并接管表头对齐 */
@@ -114,18 +112,15 @@ var CSS = ''
 	+ '.cr-dev-empty{padding:14px 4px;opacity:.6;text-align:center}'
 	+ '.cr-tup{margin-left:.55em}'
 	+ '.cr-legend{font-size:78%;opacity:.5;margin-left:.2em}'
-	/* 统计卡两行: 上行 IPv4(继承 170% 字号), 下行 IPv6(.62em 淡色)。
-	 * 用 em 而非 px, 手机端 .cr-dev-stats 把字号压到 140% 时能跟着缩 */
+	/* 统计卡两行: 上 IPv4, 下 IPv6, 两行字号与颜色一致(都继承 170% 的卡片字号)。
+	 * 用 em 而非 px 的口径保留在 .cr-dev-stat-val 上, 手机端压到 140% 时一起缩 */
 	+ '.cr-sv4{display:block;line-height:1.2}'
-	+ '.cr-sv6{display:block;font-size:.62em;font-weight:400;opacity:.6;line-height:1.3;'
-	+ 'font-variant-numeric:tabular-nums}'
+	+ '.cr-sv6{display:block;line-height:1.2;font-variant-numeric:tabular-nums}'
 	/* 2K/4K 下所有列按比例一起拉宽, 数值离表头太远显得散 —— 与「在线主机」页同口径:
 	 * 整块限宽 1800px(左对齐), 超过 2000px 再把字号提一档, 让密度跟着宽度放大 */
 	+ '.cr-dev-box{max-width:1800px}'
 	+ '@media (min-width:2000px){'
 	+ '.cr-dev-box .cr-dev-table{font-size:0.875rem}'
-	+ '.cr-dv .cr-dv6{font-size:12px}'
-	+ '.cr-dip .cr-dv6{font-size:12px}'
 	+ '}'
 	+ '@media (max-width:768px){'
 	+ '.cr-dev-cards{display:flex}'
@@ -138,9 +133,6 @@ var CSS = ''
 	+ '@media (prefers-color-scheme:dark){'
 	+ '.cr-dev-pill.on{color:#4ade80;background:rgba(34,197,94,.2);border-color:rgba(34,197,94,.42)}'
 	+ '.cr-dev-pill.off{color:#9aa0a6;background:rgba(148,163,184,.16);border-color:rgba(148,163,184,.34)}'
-	+ '.cr-dv .cr-dv6{opacity:.7}'
-	+ '.cr-dip .cr-dv6{opacity:.72}'
-	+ '.cr-sv6{opacity:.72}'
 	+ '}';
 
 function ensureStyle() {
@@ -153,9 +145,8 @@ function ensureStyle() {
 }
 
 function stat(label, color) {
-	/* 两行: 上 IPv4(主, 继承卡片字号), 下 IPv6(.62em 淡色)。
-	 * 子元素用 em 而不是固定 px —— 手机上 .cr-dev-stats 会把字号压到 140%,
-	 * em 才能跟着一起缩 */
+	/* 两行: 上 IPv4, 下 IPv6, 字号/字重/颜色完全一致。
+	 * 都继承卡片字号(em 口径), 手机上 .cr-dev-stats 压到 140% 时一起缩 */
 	var v4 = E('span', { 'class': 'cr-sv4' }, ['-']);
 	var v6 = E('span', { 'class': 'cr-sv6' }, ['-']);
 	var val = E('div', { 'class': 'cr-dev-stat-val',
@@ -233,8 +224,8 @@ return view.extend({
 			]), v4: a, v6: b, box: box };
 		}
 
-		/* 两行数值: 上 IPv4(主), 下 IPv6(淡色小字)。
-		 * 没有 v6 地址时第二行给占位符, 行高与数字基线才不会跳 */
+		/* 两行数值: 上 IPv4, 下 IPv6(同字号同颜色)。
+		 * 没有 v6 流量时第二行给占位符, 行高与数字基线才不会跳 */
 		function pair(color) {
 			var a = E('span', {}, ['-']);
 			var b = E('span', { 'class': 'cr-dv6' }, ['-']);
