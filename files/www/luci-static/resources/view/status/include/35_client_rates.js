@@ -62,7 +62,22 @@ var CSS = ''
 	+ '.cr-neg{display:flex;flex-direction:column;align-items:flex-end;font-size:11px;white-space:nowrap}'
 	+ '.cr-neg .cr-mhz{font-style:normal;font-size:10px;opacity:.62}'
 	+ '.cr-rssi{font-variant-numeric:tabular-nums;font-size:12px}'
-	+ 
+	/* ===== 宽屏自适应 =====
+	   2K/4K 下 11 列全是百分比, 会按比例一起拉宽: 数字右对齐后又离表头很远,
+	   整行看着散。把「统计条 + 表格」整块限宽 1800px(左对齐, 与页面其他内容
+	   共用同一条左边线), 超过 1800px 再把字号/内边距提一档 —— 让密度跟着宽度
+	   一起放大, 而不是只把列拉宽 */
+	+ '.cr-hosts-box{max-width:1800px}'
+	+ '@media (min-width:2000px){'
+	+ '.cr-hosts-table{font-size:14px}'
+	+ '.cr-hosts-table th,.cr-hosts-table td{padding-left:7px !important;padding-right:7px !important}'
+	+ '.cr-hosts-table td.num{font-size:12.5px}'
+	+ '.cr-rssi{font-size:13px}'
+	+ '.cr-link{font-size:13.5px}'
+	+ '.cr-neg{font-size:12px}'
+	+ '.cr-neg .cr-mhz{font-size:11px}'
+	+ '.cr-ipwrap .cr-v6{font-size:12px}'
+	+ '}'
 	+ '.cr-empty{padding:14px 4px;opacity:.6}'
 	/* ===== 移动端: 卡片视图 (参考 OAF 用户列表的 user-card) ===== */
 	+ '.cr-hosts-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}'
@@ -358,7 +373,7 @@ return baseclass.extend({
 		var cardsEl = E('div', { 'class': 'cr-cards' });
 		var empty = E('div', { 'class': 'cr-empty' }, [_('暂无设备')]);
 
-		var node = E('div', {}, [
+		var node = E('div', { 'class': 'cr-hosts-box' }, [
 			E('div', { 'class': 'cr-hosts-head' }, [
 				E('span', {}, [E('span', { 'class': 'k' }, [_('在线用户')]), onlineV]),
 				E('span', {}, [E('span', { 'class': 'k' }, [_('上传总带宽')]), upV]),
