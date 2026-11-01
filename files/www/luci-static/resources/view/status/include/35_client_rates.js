@@ -191,6 +191,11 @@ function rateTitle(c) {
 		+ (c.ip6 ? ('\nIPv6 \u2191\u00a0' + fmtRate(c.up6) + '\u00a0\u00a0\u2193\u00a0' + fmtRate(c.down6)) : '');
 }
 
+function connTitle(c) {
+	return 'IPv4 ' + (c.conn || 0) + '\u00a0' + _('条')
+		+ (c.ip6 ? ('\nIPv6 ' + (c.conn6 || 0) + '\u00a0' + _('条')) : '');
+}
+
 /* 无线协商速率: iwinfo 给的是 1201.0, 取整显示; 2.4G 老模式没有频宽则只有速率。
  * dir=rx 是客户端发来的(上行), dir=tx 是发给客户端的(下行)。
  * 拆成两个节点(速率 + 频宽) 上下两行, 一行太长会把表格撑宽 40px。 */
@@ -293,7 +298,7 @@ function renderCell(c) {
 	var cMac = cardLine(_('MAC 地址'));
 	var cUp = cardLine2(_('上传'));
 	var cDown = cardLine2(_('下载'));
-	var cConn = cardLine(_('连接数'));
+	var cConn = cardLine2(_('连接数'));
 	var cToday = cardLine2(_('今日流量'));
 	var cLink = cardLine(_('连接方式'));
 	var cRx = cardLine(_('接收速率'));
@@ -317,13 +322,13 @@ function renderCell(c) {
 	var ip4El = E('span', {}, [c.ip || '-']);
 	var ip6El = E('span', { 'class': 'cr-v6', 'title': c.ip6 || '' }, [c.ip6 || '-']);
 
-	/* 上传 / 下载 / 今日流量: 第一行 v4, 第二行 v6 */
+	/* 上传 / 下载 / 连接数 / 今日流量: 第一行 v4, 第二行 v6 */
 	function pair() {
 		var a = E('span', {}, ['-']);
 		var b = E('span', { 'class': 'cr-v6v' }, ['-']);
 		return { box: E('div', { 'class': 'cr-2v' }, [a, b]), a: a, b: b };
 	}
-	var upP = pair(), downP = pair(), todayP = pair();
+	var upP = pair(), downP = pair(), connP = pair(), todayP = pair();
 
 	return {
 		dot: E('span', { 'class': 'cr-dot' + (c.online ? '' : ' off') }),
@@ -339,15 +344,15 @@ function renderCell(c) {
 		mac: E('span', { 'class': 'cr-mac' }, [c.mac || '-']),
 		up: upP.box, up4: upP.a, up6: upP.b,
 		down: downP.box, down4: downP.a, down6: downP.b,
+		conn: connP.box, conn4: connP.a, conn6: connP.b,
 		today: todayP.box, t4: todayP.a, t6: todayP.b,
 		rssi: E('span', { 'class': 'cr-rssi' }, ['-']),
-		conn: E('span', {}, ['-']),
 		link: E('span', { 'class': 'cr-link' }, [c.link || '-']),
 		rx: E('span', { 'class': 'cr-neg' }, [c.link ? (c.rate ? '\u2013' : '-') : '-']),
 		tx: E('span', { 'class': 'cr-neg' }, [c.link ? (c.rate ? '\u2013' : '-') : '-']),
 		card: card, cPill: cPill, cIp: cIp.v4, cIp6: cIp.v6, cMac: cMac.v,
 		cUp: cUp.v4, cUp6: cUp.v6, cDown: cDown.v4, cDown6: cDown.v6,
-		cConn: cConn.v, cToday: cToday.v4, cToday6: cToday.v6, cLink: cLink.v,
+		cConn: cConn.v4, cConn6: cConn.v6, cToday: cToday.v4, cToday6: cToday.v6, cLink: cLink.v,
 		cRx: cRx.v, cTx: cTx.v, cRssi: cRssi.v
 	};
 }
@@ -408,7 +413,9 @@ function fill(tr, c) {
 		cl.cRssi.textContent = '-';
 		cl.cRssi.style.color = '';
 	}
-	cl.conn.textContent = (c.conn != null) ? String(c.conn) : '-';
+	cl.conn4.textContent = (c.conn != null) ? String(c.conn) : '-';
+	cl.conn6.textContent = c.ip6 ? ((c.conn6 != null) ? String(c.conn6) : '-') : '\u2013';
+	cl.conn.title = connTitle(c);
 	cl.link.textContent = c.link || '-';
 	setNegRate(cl.rx, c.link ? c.rate : null, 'rx');
 	setNegRate(cl.tx, c.link ? c.rate : null, 'tx');
@@ -427,6 +434,7 @@ function fill(tr, c) {
 	cl.cDown.textContent = fmtRate(c.down);
 	cl.cDown6.textContent = v6RateText(c, 'down');
 	cl.cConn.textContent = (c.conn != null) ? String(c.conn) : '-';
+	cl.cConn6.textContent = c.ip6 ? ((c.conn6 != null) ? String(c.conn6) : '-') : '\u2013';
 	cl.cToday.textContent = todayText(c, false);
 	cl.cToday6.textContent = todayText(c, true);
 	cl.cToday.title = dayTitle(c, false);
@@ -515,7 +523,7 @@ return baseclass.extend({
 						E('th', {}, [_('IPv4 / IPv6')]),
 						E('th', { 'class': 'num', 'title': _('上传: 第一行 IPv4, 第二行 IPv6') }, [_('上传')]),
 						E('th', { 'class': 'num', 'title': _('下载: 第一行 IPv4, 第二行 IPv6') }, [_('下载')]),
-						E('th', { 'class': 'num' }, [_('连接数')]),
+						E('th', { 'class': 'num', 'title': _('连接数: 第一行 IPv4, 第二行 IPv6') }, [_('连接数')]),
 						E('th', { 'class': 'num', 'title': _('今日累计: 第一行 IPv4, 第二行 IPv6') }, [_('今日流量')]),
 						E('th', { 'class': 'ctr' }, [E('span', { 'class': 'cr-lk-in' }, [_('连接方式')])]),
 						E('th', { 'class': 'num' }, [_('接收速率')]),

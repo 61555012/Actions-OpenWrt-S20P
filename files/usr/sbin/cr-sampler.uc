@@ -458,8 +458,10 @@ function parse_ct6(line) {
 }
 
 /* 增量累加到 cur6[mac] = { up, down }; 基线 id 用 (mac, 对端, 两端端口) 而非地址,
- * 设备隐私地址轮换时同一条流的累计值不会被重复计入 */
-function sample_ct6(line, cur6, t) {
+ * 设备隐私地址轮换时同一条流的累计值不会被重复计入。
+ * seen6[id] = mac: 顺带记下本次 tick 出现过的 v6 连接(一个 conntrack 条目含去/回
+ * 两段, 只算一条), 供「连接数」列的 v6 行使用 —— 与流量增量无关, 0 字节的新连接也算。 */
+function sample_ct6(line, cur6, t, seen6) {
 	let d = parse_ct6(line);
 	if (length(d) < 2) return;
 	let a1 = expand6(d[0].src), a2 = expand6(d[1].src);
@@ -475,6 +477,7 @@ function sample_ct6(line, cur6, t) {
 	let peer = first ? a2 : a1;
 	let id = 'c6|' + mac + '|' + peer + '|'
 		+ (first ? d[0].sport : d[1].sport) + '|' + (first ? d[0].dport : d[1].dport);
+	if (seen6 != null) seen6[id] = mac;
 	let p = base[id];
 	let du = 0, dd = 0;
 	if (p != null) {
@@ -496,7 +499,7 @@ function sample_ct6(line, cur6, t) {
 }
 
 /* cur: flowkey -> {up,down,ip,mac}   本次 tick 的增量汇总 */
-function sample_ct(cur, seen, t, cur6) {
+function sample_ct(cur, seen, t, cur6, seen6) {
 	let txt = null;
 	try { txt = fs.readfile(CT_PATH); } catch (e) { return; }
 	if (txt == null) return;
@@ -504,7 +507,7 @@ function sample_ct(cur, seen, t, cur6) {
 	for (let i = 0; i < length(lines); i++) {
 		if (index(lines[i], 'ipv6') == 0) {
 			touch_v6(lines[i], t);
-			if (cur6 != null) sample_ct6(lines[i], cur6, t);
+			if (cur6 != null) sample_ct6(lines[i], cur6, t, seen6);
 			continue;
 		}
 		let m = match(lines[i], RE_CT);
@@ -696,8 +699,8 @@ function run() {
 	}
 	if (tick % RSSI_EVERY == 0) { rssi = read_rssi(); links = read_links(); }
 
-	let cur = {}, seen = {}, cur6 = {};
-	sample_ct(cur, seen, t, cur6);
+	let cur = {}, seen = {}, cur6 = {}, seen6 = {};
+	sample_ct(cur, seen, t, cur6, seen6);
 	sample_hnat(cur, seen, t);
 
 	/* 连接数: 本 tick 出现过的流(两源并集)归到设备 */
@@ -710,6 +713,16 @@ function run() {
 		let rec = client_for(mac, s.ip, leases);
 		let n = fcount[rec.key];
 		fcount[rec.key] = (n != null) ? n + 1 : 1;
+	}
+
+	/* v6 连接数: 一个 conntrack ipv6 条目算一条, 按 v6pool 反查出的 mac 归集。
+	 * 设备记录的 key 在 mac 已知时就是 mac, 所以下面能直接用 clients 的 key 取 */
+	let fcount6 = {};
+	for (let id in seen6) {
+		let mac = seen6[id];
+		if (mac == null || mac == LAN_MAC1 || mac == LAN_MAC2) continue;
+		let n = fcount6[mac];
+		fcount6[mac] = (n != null) ? n + 1 : 1;
 	}
 
 	/* 流量增量归到设备 */
@@ -802,6 +815,7 @@ function run() {
 		if (c.up6_rate < 1) c.up6_rate = 0;
 		if (c.down6_rate < 1) c.down6_rate = 0;
 		c.conn = fcount[k] || 0;
+		c.conn6 = fcount6[k] || 0;
 		tot_up += c.up_rate + c.up6_rate; tot_dn += c.down_rate + c.down6_rate;
 		let on = ((t - c.last_seen) <= ONLINE_WIN);
 		if (on) online++;
@@ -820,7 +834,7 @@ function run() {
 			up_today: int(c.up_today), down_today: int(c.down_today),
 			up6_today: int(c.up6_today), down6_today: int(c.down6_today),
 			hours: ((t - c.last_seen) <= 43200) ? c.hours : {},
-			conn: c.conn, rssi: c.rssi,
+			conn: c.conn, conn6: c.conn6 || 0, rssi: c.rssi,
 			link: (c.mac != null) ? (links[c.mac] ?? null) : null,
 			rate: (c.mac != null && rates[c.mac] != null) ? rates[c.mac] : null,
 			last_seen: int(c.last_seen), first_seen: int(c.first_seen),
