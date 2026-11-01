@@ -40,6 +40,8 @@ files/                                   # 公共文件, 构建时合并进固�
 - 「在线主机」的 IP 列把 IPv4 / IPv6 叠在一格（上 v4 下 v6）；**上传 / 下载 / 连接数 / 今日流量**四列同样分两行，第一行 IPv4、第二行淡色小字 IPv6（无 v6 地址显示 `–` 占位，保证行高一致）。
   IPv6 流量与连接数由 `cr-sampler.uc` 单独采样（MT7986 的 HNAT 只有 `IPV4_` 条目，IPv6 全部走 conntrack 软件路径，按邻居表地址反查 MAC 归属）；v6 连接数按「一个 conntrack ipv6 条目算一条」统计，与是否产生字节无关。
   注意后端的 `up_today`/`down_today` 是 v4+v6 的总量，所以「今日流量」列的 v4 行用「总量 − v6 量」算，两行相加才是设备当日真实流量。
+- 「设备流量」页（`view/client-rates/overview.js`）同样分 v4 / v6 两行：IP 地址、下行、上行、今日下行、今日上行、**连接数**都上行 IPv4、下行淡色 IPv6；
+  今日流量同样用「总量 − v6 量」算 v4 行。整块内容限宽 1800px（≥2000px 视口字号提一档），与首页表格口径一致；≤768px 切卡片视图。
 - 24.10 的插件集与 25.12 相同，额外增加 `wrtbwmon`；并在编译前强校验闭源 WiFi (`kmod-mt_wifi`) 与 MTK 硬件加速 (`kmod-mediatek_hnat` / `kmod-warp`) 已启用。
 
 ## Usage

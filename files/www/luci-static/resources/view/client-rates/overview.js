@@ -8,8 +8,48 @@ var callStatus = rpc.declare({
 	method: 'status'
 });
 
-function fmtRate(v) { return String.format('%1024.2mB/s', v || 0); }
+/* 速率: 数值大时自动减小数位, 9 列后每个数值列只剩 80px 左右 */
+function fmtRate(v) {
+	v = v || 0;
+	var f = (v >= 102400) ? '%1024.0mB/s' : ((v >= 10240) ? '%1024.1mB/s' : '%1024.2mB/s');
+	return String.format(f, v);
+}
+
 function fmtB(v) { return String.format('%1024.2mB', v || 0); }
+
+/* 今日流量是累计值, 两位小数没意义: 按量级降精度 —— "629 MiB" / "16.9 MiB"。
+ * 精确值放 title(设备行里有两行, 太长的数字会挤掉 IPv6 那一行) */
+function fmtDay(v) {
+	v = v || 0;
+	if (v < 1) return '0\u00a0B';
+	var u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'], i = 0, n = v;
+	while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+	var d = (n >= 100) ? 0 : (n >= 10 ? 1 : 2);
+	return n.toFixed(d) + '\u00a0' + u[i];
+}
+
+/* 后端的 up_today/down_today 是「v4 + v6」的总量(v6 也并入设备总量),
+ * 所以 v4 那一行要用差值算, 否则和下面 v6 行重复计数 */
+function v4Today(c, dir) {
+	var all = (dir == 'up' ? c.up_today : c.down_today) || 0;
+	var s6 = (dir == 'up' ? c.up6_today : c.down6_today) || 0;
+	return (all > s6) ? (all - s6) : 0;
+}
+
+function dayTitle(c, v6, dir) {
+	var up = dir == 'up';
+	if (v6 && !c.ip6) return '';
+	return (v6 ? 'IPv6' : 'IPv4') + ' ' + _('今日') + ': ↑\u00a0'
+		+ fmtB(v6 ? c.up6_today : v4Today(c, 'up')) + '\u00a0\u00a0↓\u00a0'
+		+ fmtB(v6 ? c.down6_today : v4Today(c, 'down'));
+}
+
+function rateTitle(c, v6, dir) {
+	if (v6 && !c.ip6) return '';
+	var up = dir == 'up';
+	return (v6 ? 'IPv6' : 'IPv4') + ': ↑\u00a0' + fmtRate(v6 ? c.up6 : c.up)
+		+ '\u00a0\u00a0↓\u00a0' + fmtRate(v6 ? c.down6 : c.down);
+}
 
 /* 离线设备只在列表里保留最近 24h 出现过的(与后端 cr-sampler 的 OFFLINE_WIN 一致) */
 var OFFLINE_WIN = 86400;
@@ -55,11 +95,33 @@ var CSS = ''
 	+ '.cr-dev-card-k{flex:0 0 auto;opacity:.6}'
 	+ '.cr-dev-card-v{min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
 	+ 'font-variant-numeric:tabular-nums}'
+	/* 数值列两行: 上 IPv4, 下 IPv6(淡色小字)。opacity 只压第二行,
+	 * 父级的下行蓝 / 上行橙仍保留 —— 一眼能看出是同一个指标的两条路径 */
+	+ '.cr-dv{display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.26;'
+	+ 'font-variant-numeric:tabular-nums;vertical-align:middle;max-width:100%;min-width:0}'
+	+ '.cr-dv>span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+	+ '.cr-dv .cr-dv6{font-size:11px;opacity:.55;font-weight:400}'
+	+ '.cr-dip{display:inline-flex;flex-direction:column;line-height:1.26;vertical-align:middle;'
+	+ 'min-width:0;max-width:100%}'
+	+ '.cr-dip>span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+	+ '.cr-dip .cr-dv6{font-size:11px;opacity:.6}'
 	/* 状态列表头居中(cascade.css 里 th:nth-child(8)), 单元格原来带 .td.left 左对齐,
-	 * 两边一个居中一个贴左, 看着永远差半格 → 单元格也居中 */
-	+ '.cr-table-wrap > .cr-dev-table > tbody > tr > td:nth-child(8){text-align:center!important}'
+	 * 两边一个居中一个贴左, 看着永远差半格 → 单元格也居中。
+	 * 新增「连接数」列后状态列从第 8 列变成第 9 列, 一并接管表头对齐 */
+	+ '.cr-table-wrap > .cr-dev-table th:nth-child(8){text-align:right!important}'
+	+ '.cr-table-wrap > .cr-dev-table th:nth-child(9){text-align:center!important}'
+	+ '.cr-table-wrap > .cr-dev-table > tbody > tr > td:nth-child(9){text-align:center!important}'
 	+ '.cr-dev-empty{padding:14px 4px;opacity:.6;text-align:center}'
 	+ '.cr-tup{margin-left:.4em}'
+	+ '.cr-legend{font-size:78%;opacity:.5;margin-left:.2em}'
+	/* 2K/4K 下所有列按比例一起拉宽, 数值离表头太远显得散 —— 与「在线主机」页同口径:
+	 * 整块限宽 1800px(左对齐), 超过 2000px 再把字号提一档, 让密度跟着宽度放大 */
+	+ '.cr-dev-box{max-width:1800px}'
+	+ '@media (min-width:2000px){'
+	+ '.cr-dev-box .cr-dev-table{font-size:0.875rem}'
+	+ '.cr-dv .cr-dv6{font-size:12px}'
+	+ '.cr-dip .cr-dv6{font-size:12px}'
+	+ '}'
 	+ '@media (max-width:768px){'
 	+ '.cr-dev-cards{display:flex}'
 	+ '.cr-table-wrap{display:none!important}'
@@ -71,6 +133,8 @@ var CSS = ''
 	+ '@media (prefers-color-scheme:dark){'
 	+ '.cr-dev-pill.on{color:#4ade80;background:rgba(34,197,94,.2);border-color:rgba(34,197,94,.42)}'
 	+ '.cr-dev-pill.off{color:#9aa0a6;background:rgba(148,163,184,.16);border-color:rgba(148,163,184,.34)}'
+	+ '.cr-dv .cr-dv6{opacity:.7}'
+	+ '.cr-dip .cr-dv6{opacity:.72}'
 	+ '}';
 
 function ensureStyle() {
@@ -124,6 +188,7 @@ return view.extend({
 			E('span', { 'style': 'opacity:.6' },
 				[data.hnat ? _('数据源：conntrack + HNAT 硬件流表双源采样，硬件加速下同样计入')
 				           : _('未检测到 HNAT 硬件流表，当前仅统计软件路径')]),
+			E('span', { 'class': 'cr-legend' }, [_('数值与连接数均为两行：上 IPv4、下 IPv6')]),
 			hiddenEl
 		]);
 
@@ -138,29 +203,51 @@ return view.extend({
 			]), v: v };
 		}
 
+		/* 卡片里的两行值: 与表格同一套 .cr-dv, 保证两处字号口径一致 */
+		function cardLine2(label) {
+			var a = E('span', {}, ['-']);
+			var b = E('span', { 'class': 'cr-dv6' }, ['-']);
+			var box = E('span', { 'class': 'cr-dv' }, [a, b]);
+			return { line: E('div', { 'class': 'cr-dev-card-line' }, [
+				E('span', { 'class': 'cr-dev-card-k' }, [label]), box
+			]), v4: a, v6: b, box: box };
+		}
+
+		/* 两行数值: 上 IPv4(主), 下 IPv6(淡色小字)。
+		 * 没有 v6 地址时第二行给占位符, 行高与数字基线才不会跳 */
+		function pair(color) {
+			var a = E('span', {}, ['-']);
+			var b = E('span', { 'class': 'cr-dv6' }, ['-']);
+			var box = E('span', { 'class': 'cr-dv', 'style': color ? 'color:' + color : '' }, [a, b]);
+			return { box: box, a: a, b: b };
+		}
+
 		function rowFor(c) {
 			var key = c.mac || ('ip:' + c.ip);
 			var r = rows[key];
 			if (r) return r;
 			var nameEl = E('span', { 'style': 'font-weight:600;display:inline-block;max-width:8.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle' }, ['-']);
 			var subEl = E('span', { 'style': 'font-size:85%;opacity:.6;margin-left:6px' }, ['']);
-			var ipEl = E('span', {}, ['-']);
+			var ip4El = E('span', {}, ['-']);
+			var ip6El = E('span', { 'class': 'cr-dv6' }, ['-']);
+			var ipWrap = E('span', { 'class': 'cr-dip' }, [ip4El, ip6El]);
 			var macEl = E('span', {}, ['-']);
-			var downEl = E('span', { 'style': 'color:#2f7ed8;font-weight:600' }, ['-']);
-			var upEl = E('span', { 'style': 'color:#e08b2c;font-weight:600' }, ['-']);
-			var tDown = E('span', {}, ['-']);
-			var tUp = E('span', {}, ['-']);
+			var downP = pair('#2f7ed8'), upP = pair('#e08b2c');
+			var tDownP = pair(), tUpP = pair(), connP = pair();
+			downP.box.style.fontWeight = '600';
+			upP.box.style.fontWeight = '600';
 			var statEl = E('span', { 'class': 'cr-dev-pill on' }, ['-']);
 			var iconWrap = E('span', { 'style': 'vertical-align:middle' });
 
 			var tr = E('tr', { 'class': 'tr' }, [
 				E('td', { 'class': 'td left', 'style': 'white-space:nowrap' }, [iconWrap, nameEl, subEl]),
-				cell(ipEl),
+				cell(ipWrap),
 				cell(macEl),
-				E('td', { 'class': 'td right' }, [downEl]),
-				E('td', { 'class': 'td right' }, [upEl]),
-				E('td', { 'class': 'td right' }, [tDown]),
-				E('td', { 'class': 'td right' }, [tUp]),
+				E('td', { 'class': 'td right' }, [downP.box]),
+				E('td', { 'class': 'td right' }, [upP.box]),
+				E('td', { 'class': 'td right' }, [tDownP.box]),
+				E('td', { 'class': 'td right' }, [tUpP.box]),
+				E('td', { 'class': 'td right' }, [connP.box]),
 				E('td', { 'class': 'td left' }, [statEl])
 			]);
 
@@ -168,14 +255,15 @@ return view.extend({
 			var cTitle = E('div', { 'class': 'cr-dev-card-title' }, ['-']);
 			var cSub = E('div', { 'class': 'cr-dev-card-sub' }, ['']);
 			var cPill = E('span', { 'class': 'cr-dev-card-pill cr-dev-pill on' }, [_('在线')]);
-			var cIp = cardLine(_('IP 地址'));
-			var cMac = cardLine(_('MAC'), true);
-			var cDown = cardLine(_('下行'));
-			var cUp = cardLine(_('上行'));
-			var cTDown = cardLine(_('今日下行'));
-			var cTUp = cardLine(_('今日上行'));
-			cDown.v.style.color = '#2f7ed8'; cDown.v.style.fontWeight = '600';
-			cUp.v.style.color = '#e08b2c'; cUp.v.style.fontWeight = '600';
+			var cIp = cardLine2(_('IP 地址'));
+			var cMac = cardLine(_('MAC'));
+			var cDown = cardLine2(_('下行'));
+			var cUp = cardLine2(_('上行'));
+			var cTDown = cardLine2(_('今日下行'));
+			var cTUp = cardLine2(_('今日上行'));
+			var cConn = cardLine2(_('连接数'));
+			cDown.box.style.color = '#2f7ed8'; cDown.box.style.fontWeight = '600';
+			cUp.box.style.color = '#e08b2c'; cUp.box.style.fontWeight = '600';
 
 			var card = E('div', { 'class': 'cr-dev-card' }, [
 				E('div', { 'class': 'cr-dev-card-head' }, [
@@ -186,14 +274,22 @@ return view.extend({
 					cPill
 				]),
 				E('div', { 'class': 'cr-dev-card-body' }, [
-					cIp.line, cMac.line, cDown.line, cUp.line, cTDown.line, cTUp.line
+					cIp.line, cMac.line, cDown.line, cUp.line,
+					cTDown.line, cTUp.line, cConn.line
 				])
 			]);
 
-			r = { tr: tr, iconWrap: iconWrap, nameEl: nameEl, subEl: subEl, ipEl: ipEl, macEl: macEl,
-			      downEl: downEl, upEl: upEl, tDown: tDown, tUp: tUp, statEl: statEl, iconKey: null,
-			      card: card, cTitle: cTitle, cSub: cSub, cPill: cPill, cIp: cIp.v, cMac: cMac.v,
-			      cDown: cDown.v, cUp: cUp.v, cTDown: cTDown.v, cTUp: cTUp.v };
+			r = { tr: tr, iconWrap: iconWrap, nameEl: nameEl, subEl: subEl,
+			      ip4El: ip4El, ip6El: ip6El, macEl: macEl,
+			      down4: downP.a, down6: downP.b, up4: upP.a, up6: upP.b,
+			      tDown4: tDownP.a, tDown6: tDownP.b, tUp4: tUpP.a, tUp6: tUpP.b,
+			      conn4: connP.a, conn6: connP.b,
+			      statEl: statEl, iconKey: null,
+			      card: card, cTitle: cTitle, cSub: cSub, cPill: cPill,
+			      cIp: cIp.v4, cIp6: cIp.v6, cMac: cMac.v,
+			      cDown: cDown.v4, cDown6: cDown.v6, cUp: cUp.v4, cUp6: cUp.v6,
+			      cTDown: cTDown.v4, cTDown6: cTDown.v6, cTUp: cTUp.v4, cTUp6: cTUp.v6,
+			      cConn: cConn.v4, cConn6: cConn.v6 };
 			rows[key] = r;
 			tbody.appendChild(tr);
 			return r;
@@ -218,7 +314,12 @@ return view.extend({
 			else {
 				hiddenEl.style.display = 'none';
 			}
-			list.sort(function (a, b) { return (b.up + b.down) - (a.up + a.down); });
+			/* 按实时总速率(含 v6)排序, 与上一页同口径 */
+			list.sort(function (a, b) {
+				var sa = (a.up || 0) + (a.down || 0) + (a.up6 || 0) + (a.down6 || 0);
+				var sb = (b.up || 0) + (b.down || 0) + (b.up6 || 0) + (b.down6 || 0);
+				return sb - sa;
+			});
 
 			var keys = [];
 			list.forEach(function (c) {
@@ -230,14 +331,38 @@ return view.extend({
 				r.nameEl.textContent = title;
 				r.nameEl.title = title;
 				r.subEl.textContent = (c.host && vname) ? vname : '';
-				r.ipEl.textContent = c.ip || '-';
-				r.macEl.textContent = c.mac || '-';
-				r.downEl.textContent = fmtRate(c.down);
-				r.upEl.textContent = fmtRate(c.up);
-				r.tDown.textContent = fmtB(c.down_today);
-				r.tUp.textContent = fmtB(c.up_today);
 				r.statEl.textContent = c.online ? _('在线') : _('离线');
 				r.statEl.className = 'cr-dev-pill ' + (c.online ? 'on' : 'off');
+
+				/* 表格: 每列两行, 上 v4 下 v6; 无 v6 地址时第二行给占位符 */
+				var v6 = !!c.ip6;
+				r.ip4El.textContent = c.ip || '-';
+				r.ip6El.textContent = v6 ? c.ip6 : '\u2013';
+				r.ip6El.title = c.ip6 || '';
+				r.macEl.textContent = c.mac || '-';
+
+				r.down4.textContent = fmtRate(c.down);
+				r.down4.title = rateTitle(c, false, 'down');
+				r.down6.textContent = v6 ? fmtRate(c.down6) : '\u2013';
+				r.down6.title = rateTitle(c, true, 'down');
+				r.up4.textContent = fmtRate(c.up);
+				r.up4.title = rateTitle(c, false, 'up');
+				r.up6.textContent = v6 ? fmtRate(c.up6) : '\u2013';
+				r.up6.title = rateTitle(c, true, 'up');
+
+				r.tDown4.textContent = fmtDay(v4Today(c, 'down'));
+				r.tDown4.title = dayTitle(c, false, 'down');
+				r.tDown6.textContent = v6 ? fmtDay(c.down6_today) : '\u2013';
+				r.tDown6.title = dayTitle(c, true, 'down');
+				r.tUp4.textContent = fmtDay(v4Today(c, 'up'));
+				r.tUp4.title = dayTitle(c, false, 'up');
+				r.tUp6.textContent = v6 ? fmtDay(c.up6_today) : '\u2013';
+				r.tUp6.title = dayTitle(c, true, 'up');
+
+				r.conn4.textContent = (c.conn != null) ? String(c.conn) : '-';
+				r.conn4.title = 'IPv4';
+				r.conn6.textContent = v6 ? String(c.conn6 || 0) : '\u2013';
+				r.conn6.title = 'IPv6';
 
 				/* 卡片视图 */
 				r.cTitle.textContent = title;
@@ -246,11 +371,18 @@ return view.extend({
 				r.cPill.textContent = c.online ? _('在线') : _('离线');
 				r.cPill.className = 'cr-dev-card-pill cr-dev-pill ' + (c.online ? 'on' : 'off');
 				r.cIp.textContent = c.ip || '-';
+				r.cIp6.textContent = v6 ? c.ip6 : '\u2013';
 				r.cMac.textContent = c.mac || '-';
 				r.cDown.textContent = fmtRate(c.down);
+				r.cDown6.textContent = v6 ? fmtRate(c.down6) : '\u2013';
 				r.cUp.textContent = fmtRate(c.up);
-				r.cTDown.textContent = fmtB(c.down_today);
-				r.cTUp.textContent = fmtB(c.up_today);
+				r.cUp6.textContent = v6 ? fmtRate(c.up6) : '\u2013';
+				r.cTDown.textContent = fmtDay(v4Today(c, 'down'));
+				r.cTDown6.textContent = v6 ? fmtDay(c.down6_today) : '\u2013';
+				r.cTUp.textContent = fmtDay(v4Today(c, 'up'));
+				r.cTUp6.textContent = v6 ? fmtDay(c.up6_today) : '\u2013';
+				r.cConn.textContent = (c.conn != null) ? String(c.conn) : '-';
+				r.cConn6.textContent = v6 ? String(c.conn6 || 0) : '\u2013';
 
 				var ik = (c.mac || '') + '|' + (c.online ? '1' : '0');
 				if (r.iconKey !== ik) {
@@ -287,7 +419,7 @@ return view.extend({
 			if (!keys.length) {
 				if (!tbody.querySelector('.empty-hint'))
 					tbody.appendChild(E('tr', { 'class': 'tr empty-hint' }, [
-						E('td', { 'class': 'td left', 'colspan': 8, 'style': 'opacity:.6' }, [_('暂无活动设备')])
+						E('td', { 'class': 'td left', 'colspan': 9, 'style': 'opacity:.6' }, [_('暂无活动设备')])
 					]));
 			}
 			else {
@@ -307,6 +439,7 @@ return view.extend({
 					E('th', { 'class': 'th', 'style': 'text-align:right' }, [_('上行')]),
 					E('th', { 'class': 'th', 'style': 'text-align:right' }, [_('今日下行')]),
 					E('th', { 'class': 'th', 'style': 'text-align:right' }, [_('今日上行')]),
+					E('th', { 'class': 'th', 'style': 'text-align:right' }, [_('连接数')]),
 					E('th', { 'class': 'th' }, [_('状态')])
 				])
 			]),
@@ -318,10 +451,12 @@ return view.extend({
 		var container = E('div', { 'class': 'cbi-map' }, [
 			E('h2', {}, [_('设备流量')]),
 			hint,
-			E('div', { 'class': 'cr-dev-stats', 'style': 'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px' },
-				[sDown.box, sUp.box, sToday.box, sOnline.box]),
-			E('div', { 'class': 'cr-table-wrap' }, [table]),
-			cardsEl
+			E('div', { 'class': 'cr-dev-box' }, [
+				E('div', { 'class': 'cr-dev-stats', 'style': 'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px' },
+					[sDown.box, sUp.box, sToday.box, sOnline.box]),
+				E('div', { 'class': 'cr-table-wrap' }, [table]),
+				cardsEl
+			])
 		]);
 
 		update(data);

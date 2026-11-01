@@ -253,10 +253,11 @@ if [ -n "$CR_THEME_CSS" ]; then
 .cr-table-wrap > .cr-dev-table th:nth-child(4),
 .cr-table-wrap > .cr-dev-table th:nth-child(5),
 .cr-table-wrap > .cr-dev-table th:nth-child(6),
-.cr-table-wrap > .cr-dev-table th:nth-child(7) {
+.cr-table-wrap > .cr-dev-table th:nth-child(7),
+.cr-table-wrap > .cr-dev-table th:nth-child(8) {
 	text-align: right !important;
 }
-.cr-table-wrap > .cr-dev-table th:nth-child(8) {
+.cr-table-wrap > .cr-dev-table th:nth-child(9) {
 	text-align: center !important;
 }
 /* ==== client-rates: 「设备流量」表格列对齐 (end) ==== */
