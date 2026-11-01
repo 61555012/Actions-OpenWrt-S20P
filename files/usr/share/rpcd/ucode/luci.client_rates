@@ -1,10 +1,14 @@
 // rpcd ucode plugin: 只读暴露 client-rates 采样结果
 'use strict';
 
-import { readfile } from 'fs';
+import { readfile, writefile } from 'fs';
 
 const FILE = '/tmp/client-rates.json';
 const STATE = '/etc/client-rates/state.json';
+/* 页面心跳: 每次 status 被调用就写一次时间戳。
+ * 采样器读这个文件决定用 1 秒(有人在看) 还是 10 秒(没人看) 采样,
+ * 关闭页面后 status 不再被调用, 心跳超时自动降频。 */
+const WATCH = '/tmp/client-rates.watch';
 
 function read_json(path) {
 	let d = null;
@@ -13,9 +17,14 @@ function read_json(path) {
 	try { return json(d); } catch (e) { return null; }
 }
 
+function beat() {
+	try { writefile(WATCH, sprintf('%d', time())); } catch (e) { }
+}
+
 const methods = {
 	status: {
 		call: function () {
+			beat();
 			const d = read_json(FILE);
 			if (d == null || type(d) != 'object')
 				return { error: 'unavailable', ts: 0, clients: [],

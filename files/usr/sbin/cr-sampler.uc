@@ -21,13 +21,20 @@ const LEASE_PATH  = '/tmp/dhcp.leases';
 const OUT_PATH    = '/tmp/client-rates.json';
 const STATE_DIR   = '/etc/client-rates';
 const STATE_PATH  = STATE_DIR + '/state.json';
-const INTERVAL    = 1;
-const SAVE_EVERY  = 30;
+/* 自适应采样: 有人在看页面(前端每秒轮询 luci.client_rates.status)时全速,
+ * 页面关掉后降到 IDLE_INTERVAL, 只维持累计量。
+ * 一次完整采样约 60~70ms(读 conntrack 18ms + HNAT 20ms + 解析 28ms),
+ * 1 秒周期约占单核 17%, 10 秒周期降到 1% 以下。 */
+const INTERVAL      = 1;      // 活跃: 页面在看时的采样周期(秒)
+const IDLE_INTERVAL = 10;     // 空闲: 没人看时的采样周期(秒)
+const WATCH_PATH    = '/tmp/client-rates.watch';
+const WATCH_TTL     = 6;      // 心跳超过这么久没更新就认为页面已关闭
+const SAVE_EVERY  = 30;       // state 落盘间隔(秒)
 const ONLINE_WIN  = 120;
 const OFFLINE_WIN = 86400;  // 离线设备只在列表里保留最近 24h, 避免设备多时列表过长
 const RATE_ALPHA  = 0.55;
-const NEIGH_EVERY = 5;      // 每 5 个 tick 取一次 IPv6 邻居表
-const RSSI_EVERY  = 10;     // 每 10 个 tick 取一次无线信号强度
+const NEIGH_SEC   = 5;      // IPv6 邻居表刷新间隔(秒)
+const RSSI_SEC    = 10;     // 无线信号强度 / 协商速率刷新间隔(秒)
 const V6_TTL      = 86400;  // v6 地址池条目保留时长(秒)
 const KEEP_BASE   = 180;    // 源条目基线保留时长(秒)
 const KEEP_DAYS   = 7;
@@ -461,6 +468,12 @@ let day = daykey(now());
 let tick = 0;
 let prev_ts = now();
 let hnat_ok = true;
+/* 这些辅助刷新改成按「秒」计时, 与采样频率解耦:
+ * 空闲时一次 run 可能隔 10 秒, 用 tick 计数会让邻居表 50 秒才刷一次 */
+let last_neigh = 0;
+let last_rssi = 0;
+let last_save = 0;
+let force_refresh = false;   // 从空闲切回活跃时强制刷一轮邻居/协商/信号
 
 function flow_id(proto, cip, cport, rip, rport) {
 	return proto + '|' + cip + '|' + cport + '|' + rip + '|' + rport;
@@ -825,7 +838,10 @@ function run() {
 	let t = now(), dt = t - prev_ts;
 	if (dt <= 0) dt = 1;
 
-	if (tick % NEIGH_EVERY == 0) {
+	/* force_refresh 用在「页面刚被打开」这一拍: 立刻把 v6 邻居表、协商速率、
+	 * 无线信号都刷一遍, 免得用户看到的是一个空闲周期前的旧地址/旧频段 */
+	if (force_refresh || (t - last_neigh) >= NEIGH_SEC) {
+		last_neigh = t;
 		read_neigh6(t, read_dhcpv6());
 		for (let a in v6pool)
 			if ((t - v6pool[a].t) > V6_TTL) delete v6pool[a];
@@ -833,7 +849,11 @@ function run() {
 		for (let a in v6learn)
 			if ((t - v6learn[a].t) > V6_TTL) delete v6learn[a];
 	}
-	if (tick % RSSI_EVERY == 0) { rssi = read_rssi(); links = read_links(); }
+	if (force_refresh || (t - last_rssi) >= RSSI_SEC) {
+		last_rssi = t;
+		rssi = read_rssi(); links = read_links();
+	}
+	force_refresh = false;
 
 	let cur = {}, seen = {}, cur6 = {}, seen6 = {};
 	sample_ct(cur, seen, t, cur6, seen6);
@@ -936,16 +956,27 @@ function run() {
 		c.rssi = (rssi[c.mac] != null) ? rssi[c.mac] : null;
 	}
 
+	/* 平滑系数按 dt 归一化: 活跃时 dt=1 -> 0.55(约 1.2 秒时间常数),
+	 * 空闲时 dt=10 -> 0.9997, 等于直接取这 10 秒的平均, 不会把旧速率拖很久
+	 * (否则从空闲切回页面时, 页面上会先闪一下十分钟前的残留速率)。
+	 * ucode 没有 pow(), 用连乘; dt 超过 40 衰减已到 1e-11, 提前收手 */
+	let alpha = RATE_ALPHA;
+	if (dt > 1) {
+		let decay = 1;
+		for (let i = 0; i < dt && i < 40; i++) decay *= (1 - RATE_ALPHA);
+		alpha = 1 - decay;
+	}
+
 	let tot_up = 0, tot_dn = 0, tot_up6 = 0, tot_dn6 = 0;
 	let list = [], online = 0, hidden = 0;
 	for (let k in clients) {
 		let c = clients[k];
 		let s = seen_bw[k] || [0, 0];
 		let s6 = seen_bw6[k] || [0, 0];
-		c.up_rate = c.up_rate * (1 - RATE_ALPHA) + (s[0] / dt) * RATE_ALPHA;
-		c.down_rate = c.down_rate * (1 - RATE_ALPHA) + (s[1] / dt) * RATE_ALPHA;
-		c.up6_rate = c.up6_rate * (1 - RATE_ALPHA) + (s6[0] / dt) * RATE_ALPHA;
-		c.down6_rate = c.down6_rate * (1 - RATE_ALPHA) + (s6[1] / dt) * RATE_ALPHA;
+		c.up_rate = c.up_rate * (1 - alpha) + (s[0] / dt) * alpha;
+		c.down_rate = c.down_rate * (1 - alpha) + (s[1] / dt) * alpha;
+		c.up6_rate = c.up6_rate * (1 - alpha) + (s6[0] / dt) * alpha;
+		c.down6_rate = c.down6_rate * (1 - alpha) + (s6[1] / dt) * alpha;
 		if (c.up_rate < 1) c.up_rate = 0;
 		if (c.down_rate < 1) c.down_rate = 0;
 		if (c.up6_rate < 1) c.up6_rate = 0;
@@ -1041,7 +1072,8 @@ function run() {
 			clients[k].hours = {};
 		}
 	}
-	if (tick % SAVE_EVERY == 0) save_state();
+	/* state 落盘按真实时间算: 空闲时 30 个 tick 是 5 分钟, 断电丢的数据就多了 */
+	if ((t - last_save) >= SAVE_EVERY) { last_save = t; save_state(); }
 }
 
 load_state();
@@ -1070,7 +1102,8 @@ warn('client-rates: started, lan=' + LAN + ' router=' + ROUTER_IP);
 
 /* 注意: 本固件的 ucode sleep(n) 单位是「毫秒」而非秒,
    写成 sleep(INTERVAL) 会变成 sleep(1ms) -> 空转跑满一个核。 */
-const TICK_MS = INTERVAL * 1000;
+const ACTIVE_MS = INTERVAL * 1000;
+const IDLE_MS   = IDLE_INTERVAL * 1000;
 
 /* clock(true) 返回 [秒, 纳秒], 转成毫秒 */
 function clock_ms() {
@@ -1078,11 +1111,47 @@ function clock_ms() {
 	return c[0] * 1000 + int(c[1] / 1000000);
 }
 
+/* 页面心跳有多旧(秒)。
+ * rpcd 的 luci.client_rates.status 每被调用一次就写一次时间戳到 WATCH_PATH,
+ * 前端三个页面(设备流量 / 首页在线主机 / oaf-bridge)都是 1 秒轮询,
+ * 所以「有人在看」= 心跳在 WATCH_TTL 秒内; 页面一关, 心跳自然停更, 这里就会超时。 */
+function watch_age() {
+	let d = null;
+	try { d = fs.readfile(WATCH_PATH); } catch (e) { return 1e9; }
+	if (d == null) return 1e9;
+	let ts = +trim(d);
+	if (!ts) return 1e9;
+	return now() - ts;
+}
+
+let next_run = clock_ms();   // 启动后立刻跑第一轮
+let active = false;
+
 while (true) {
-	let t0 = clock_ms();
-	try { run(); } catch (e) { warn('client-rates tick error: ' + e); }
-	/* 扣掉本轮计算耗时, 让上报周期稳定为 INTERVAL 秒 */
-	let wait = TICK_MS - (clock_ms() - t0);
-	if (wait < TICK_MS / 4) wait = TICK_MS / 4;
+	let alive = (watch_age() <= WATCH_TTL);
+	if (alive && !active) {
+		/* 页面刚打开: 立刻插一轮全量采样(含 v6 邻居表、协商速率、信号强度), 
+		 * 不等空闲周期走完, 用户一刷新就有数 */
+		active = true;
+		force_refresh = true;
+		next_run = clock_ms();
+	} else if (!alive && active) {
+		active = false;
+	}
+
+	if (clock_ms() >= next_run) {
+		let t0 = clock_ms();
+		try { run(); } catch (e) { warn('client-rates tick error: ' + e); }
+		/* 扣掉本轮计算耗时, 让采样周期稳定 */
+		next_run = t0 + (active ? ACTIVE_MS : IDLE_MS);
+	}
+
+	let nowms = clock_ms();
+	let wait = next_run - nowms;
+	/* 空闲时最多睡 1 秒就醒来看一眼心跳: 页面一打开就能在 1 秒内切回高频。
+	 * 这一次唤醒只读一个十几字节的文件, 开销可以忽略。 */
+	let cap = active ? ACTIVE_MS : 1000;
+	if (wait > cap) wait = cap;
+	if (wait < 50) wait = 50;
 	sleep(wait);
 }
