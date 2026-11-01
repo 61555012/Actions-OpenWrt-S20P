@@ -53,18 +53,18 @@ var CSS = ''
 	/* IPv4 / IPv6 叠在同一列: 上 v4 下 v6, 省一列宽度 */
 	+ '.cr-ipwrap{display:flex;flex-direction:column;line-height:1.24;min-width:0}'
 	+ '.cr-ipwrap>span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
-	+ '.cr-ipwrap .cr-v6{font-size:11px;opacity:.66}'
+	/* IPv6 那行与 IPv4 同字号同颜色(不再压字号/降透明度) */
 	/* 上传 / 下载 / 今日流量: v4 在上, v6 叠在下面一行小字。
 	   两行始终存在(无 v6 时给占位符), 所以同表各行的数值基线与行高都对齐 */
 	+ '.cr-2v{display:flex;flex-direction:column;align-items:flex-end;line-height:1.26;'
 	+ 'font-variant-numeric:tabular-nums}'
 	+ '.cr-2v>span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;'
 	+ 'white-space:nowrap}'
-	+ '.cr-2v .cr-v6v{font-size:11px;opacity:.55}'
-	+ '@media (prefers-color-scheme:dark){.cr-2v .cr-v6v{opacity:.7}}'
-	/* 连接方式: 短文本整列居中, 表头和数据同一中线; 右移 6px 让表头两侧留白均衡
-	   (左邻「连接数」是右对齐数字, 贴得较近) */
-	+ '.cr-link,.cr-lk-in{font-size:12.5px;position:relative;left:6px;display:inline-block}'
+	/* v6 副行同样与 v4 主行同字号同颜色 */
+	/* 连接方式: 短文本整列居中; 两侧都是右对齐的数字列(今日流量 / 接收速率),
+	   数字宽度每秒都在变, 纯 CSS 居中会一直偏心 —— 平移量由 JS 量出两边文字的
+	   中点后写进 --cr-lk-shift, 整列共用一个值(不会各行参差) */
+	+ '.cr-link,.cr-lk-in{font-size:12.5px;position:relative;left:var(--cr-lk-shift,0px);display:inline-block}'
 	+ '.cr-hosts-table th .cr-lk-in{font-size:inherit}'
 	+ '.cr-td-neg{font-variant-numeric:tabular-nums;line-height:1.2;text-align:right !important}'
 	+ '.cr-neg{display:flex;flex-direction:column;align-items:flex-end;font-size:11px;white-space:nowrap}'
@@ -84,8 +84,6 @@ var CSS = ''
 	+ '.cr-link{font-size:13.5px}'
 	+ '.cr-neg{font-size:12px}'
 	+ '.cr-neg .cr-mhz{font-size:11px}'
-	+ '.cr-ipwrap .cr-v6{font-size:12px}'
-	+ '.cr-2v .cr-v6v{font-size:12px}'
 	+ '}'
 	+ '.cr-empty{padding:14px 4px;opacity:.6}'
 	/* ===== 移动端: 卡片视图 (参考 OAF 用户列表的 user-card) ===== */
@@ -215,6 +213,43 @@ function negRateText(r, dir) {	if (!r) return '-';
 	var m = (dir == 'rx') ? r.rxm : r.txm;
 	if (v == null) return '-';
 	return Math.round(v) + '\u00a0Mbit/s' + (m ? ', ' + m + '\u00a0MHz' : '');
+}
+
+/* 把「连接方式」列平移到「今日流量」最后一个数字 与「接收速率」第一个数字 的正中间。
+   两边都是右对齐的数字列, 宽度每秒都在变, 光靠 CSS 居中永远会偏;
+   这里量出左边数字的右边缘(右对齐 -> 各行一致)和右边数字最宽那行的左边缘(取最左),
+   把中点写进表格的 --cr-lk-shift, 表头和数据行共用一个偏移, 列不会参差也不会每秒抖。 */
+function alignLinkCol(table, links) {
+	if (!table || !links || !links.length) return;
+	function textBox(el) {
+		if (!el) return null;
+		var r = document.createRange();
+		r.selectNodeContents(el);
+		var b = r.getBoundingClientRect();
+		return (b.width > 0 && b.height > 0) ? b : null;
+	}
+	var aRight = 0, bLeft = 0, got = false, i, a, b, t;
+	for (i = 0; i < links.length; i++) {
+		/* 有线设备没有协商速率, 右列只是占位的「-」, 拿它算中点是错的 */
+		t = links[i].rx ? String(links[i].rx.textContent || '') : '';
+		if (t.replace(/[\s\u00a0]+/g, '').length < 4) continue;
+		a = textBox(links[i].today);
+		b = textBox(links[i].rx);
+		if (!a || !b) continue;
+		if (a.right > aRight) aRight = a.right;
+		if (!got || b.left < bLeft) bLeft = b.left;
+		got = true;
+	}
+	if (!got || bLeft <= aRight) return;
+	var lr = links[0].link ? links[0].link.getBoundingClientRect() : null;
+	if (!lr || !lr.width) return;
+	var cur = parseFloat(table.style.getPropertyValue('--cr-lk-shift')) || 0;
+	var nat = (lr.left + lr.width / 2) - cur;        // 偏移为 0 时的自然中心
+	var want = Math.round((aRight + bLeft) / 2 - nat);
+	if (want < -8) want = -8;                        // 量歪了也不至于把标签甩出本列
+	if (want > 56) want = 56;
+	if (Math.abs(want - cur) < 2) return;            // 1px 抖动不重设, 免得每秒微跳
+	table.style.setProperty('--cr-lk-shift', want + 'px');
 }
 
 /* 两行 value: 第一行 v4, 第二行 v6 小字 */
@@ -539,6 +574,7 @@ return baseclass.extend({
 
 		this.root = node;
 		this.body = tbody;
+		this.table = node.querySelector('.cr-hosts-table');
 		this.cardsEl = cardsEl;
 		this.cardOrder = '';
 		this.emptyEl = empty;
@@ -595,6 +631,14 @@ return baseclass.extend({
 			}
 
 			this.emptyEl.style.display = list.length ? 'none' : '';
+
+			/* 连接方式列: 平移量取决于两侧数字宽度, 每次刷新重算一遍 */
+			var lks = [];
+			for (k in this.rows) {
+				var lc = this.rows[k]._cr;
+				lks.push({ link: lc.link, today: lc.today, rx: lc.rx });
+			}
+			try { alignLinkCol(this.table, lks); } catch (e) { }
 		};
 
 		try { this.update(data); } catch (e) { }
