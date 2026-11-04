@@ -23,25 +23,6 @@ find . -type d \( -name "OpenAppFilter" -o -name "luci-app-oaf" -o -name "open-a
 rm -rf package/feeds/*/luci-app-oaf package/feeds/*/OpenAppFilter
 git clone https://github.com/destan19/OpenAppFilter package/OpenAppFilter
 
-echo "==== [diy] OAF 页面注入 client-rates 速率桥接脚本 ===="
-# 目的: 仪表盘右上角 WAN 实时速率卡片 + 终端列表上下行速率改用本机 HNAT 采样值。
-# 只追加一段 <script>, 不改动 OAF 自身逻辑; 重复执行会跳过(幂等)。
-for f in package/OpenAppFilter/luci-app-oaf/luasrc/view/oaf/dashboard.htm \
-         package/OpenAppFilter/luci-app-oaf/luasrc/view/oaf/user_status.htm \
-         package/OpenAppFilter/luci-app-oaf/luasrc/view/oaf/user_detail.htm; do
-  if [ -f "$f" ]; then
-    if grep -q 'client-rates/oaf-bridge.js' "$f"; then
-      echo "    已存在, 跳过: $f"
-    else
-      printf '\n<script src="/luci-static/resources/client-rates/oaf-bridge.js?v=6"></script>\n' >> "$f"
-      grep -q 'client-rates/oaf-bridge.js' "$f" \
-        && echo "    注入成功: $f" || { echo "    [错误] 注入失败: $f"; exit 1; }
-    fi
-  else
-    echo "    [警告] 未找到 $f (OAF 目录结构可能变化)"
-  fi
-done
-
 echo "==== [diy-part2] 克隆 luci-app-mosdns (v5) 与 v2ray-geodata ===="
 git clone https://github.com/sbwml/luci-app-mosdns -b v5 package/mosdns
 git clone https://github.com/sbwml/v2ray-geodata package/v2ray-geodata
@@ -152,14 +133,11 @@ else
   echo "    [警告] 未找到 $ARGON_DEF"
 fi
 
-echo "==== [diy-part2] argon 主题: 追加 client-rates 自定义样式 ===="
-# 目的(全部针对 argon v3 的 DOM/CSS 特性):
-#   1) 防火墙「区域」表格: 区域徽标被拉成整列宽色条 / 顶到单元格边缘, 桌面宽度下还原真实表格;
-#   2) 「设备流量」表格: 窄屏时主题把 .table 拆成 thead/tbody 两个匿名表格导致表头错位,
-#      本页强制真实表格 + 表头按列对齐 + 容器内横向滚动;
-#   3) 首页「端口状态」卡片: 主题栅格带 !important, 用同款选择器缩到 100px 等距排列。
-# 做法: 构建时把样式追加进 argon 主题 cascade.css, 带 '==== client-rates:' 标记幂等(重复执行会跳过)。
-CR_CSS_MARK='==== client-rates:'
+echo "==== [diy-part2] argon 主题: 追加防火墙表格样式 ===="
+# 目的: 防火墙「区域」表格在 argon v3 下徽标被拉成整列宽色条、顶到单元格边缘,
+#       桌面宽度下还原真实表格并留出底部间距。
+# 做法: 构建时把样式追加进 argon 主题 cascade.css, 带 '==== s20p:' 标记幂等(重复执行会跳过)。
+CR_CSS_MARK='==== s20p:'
 CR_THEME_CSS=$(find feeds package -path '*argon*' -name cascade.css -type f 2>/dev/null || true)
 if [ -n "$CR_THEME_CSS" ]; then
   for f in $CR_THEME_CSS; do
@@ -167,7 +145,7 @@ if [ -n "$CR_THEME_CSS" ]; then
       echo "    已存在, 跳过: $f"
     else
       cat >> "$f" <<'CR_CUSTOM_CSS'
-/* ==== client-rates: 防火墙「区域」表格排版修正 (begin) ==== */
+/* ==== s20p: 防火墙「区域」表格排版修正 (begin) ==== */
 /* 1) 区域徽标被主题拉成整列宽的色条、wan 与 ACCEPT 徽标分散到列尾并顶到单元格边缘，
       改为紧凑徽标并左对齐: [lan] ⇒ [wan] / [ACCEPT all others] */
 #cbi-firewall-zone .zone-forwards {
@@ -232,9 +210,9 @@ if [ -n "$CR_THEME_CSS" ]; then
 		content: none !important;
 	}
 }
-/* ==== client-rates: 防火墙「区域」表格排版修正 (end) ==== */
+/* ==== s20p: 防火墙「区域」表格排版修正 (end) ==== */
 
-/* ==== client-rates: 防火墙区块底部留白 (begin) ==== */
+/* ==== s20p: 防火墙区块底部留白 (begin) ==== */
 /* 区块内最后一行(如「转发」下拉、「流量卸载类型」)原本贴住卡片底边(gap=0),
    与行间 14px 的间距不协调, 统一补 1rem 下内边距。 */
 #cbi-firewall-defaults > .cbi-section-node,
@@ -242,115 +220,8 @@ if [ -n "$CR_THEME_CSS" ]; then
 #cbi-firewall-forwarding > .cbi-section-node {
 	padding-bottom: 1rem !important;
 }
-/* ==== client-rates: 防火墙区块底部留白 (end) ==== */
+/* ==== s20p: 防火墙区块底部留白 (end) ==== */
 
-/* ==== client-rates: 「设备流量」表格列对齐 (begin) ==== */
-/* 主题在窄窗口(<1100px)会把 .table 改成 display:block，并把 tr/td 变成 flex/block，
-   原生表格被拆成 thead / tbody 两个匿名表格，列宽各算各的 → 表头与数据错位。
-   本页是纯数据表(非 CBI 表单)，统一保持真实表格，窄屏改为容器内横向滚动。 */
-.cr-table-wrap {
-	overflow-x: auto;
-	-webkit-overflow-scrolling: touch;
-}
-.cr-table-wrap > .cr-dev-table {
-	display: table !important;
-	width: 100% !important;
-	min-width: 40rem;
-	font-size: 0.78125rem;
-}
-.cr-table-wrap > .cr-dev-table > thead {
-	display: table-header-group !important;
-}
-.cr-table-wrap > .cr-dev-table > tbody {
-	display: table-row-group !important;
-}
-.cr-table-wrap > .cr-dev-table tr {
-	display: table-row !important;
-}
-.cr-table-wrap > .cr-dev-table th,
-.cr-table-wrap > .cr-dev-table td {
-	display: table-cell !important;
-	width: auto !important;
-	float: none !important;
-	white-space: nowrap;
-	vertical-align: middle;
-	/* 主题默认 20px/20px，8 列光内边距就吃掉 320px，压到 6px 才放得下 */
-	padding-left: 0.375rem !important;
-	padding-right: 0.375rem !important;
-}
-.cr-table-wrap > .cr-dev-table th::before,
-.cr-table-wrap > .cr-dev-table td::before {
-	content: none !important;
-}
-/* 表头对齐到各自数据列：文本列左对齐、数值列右对齐、状态列居中
-   （主题默认把所有 th 居中，导致「设备/IP/MAC」表头浮在数据中间，看着没对齐） */
-.cr-table-wrap > .cr-dev-table th:nth-child(1),
-.cr-table-wrap > .cr-dev-table th:nth-child(2),
-.cr-table-wrap > .cr-dev-table th:nth-child(3) {
-	text-align: left !important;
-}
-.cr-table-wrap > .cr-dev-table th:nth-child(4),
-.cr-table-wrap > .cr-dev-table th:nth-child(5),
-.cr-table-wrap > .cr-dev-table th:nth-child(6),
-.cr-table-wrap > .cr-dev-table th:nth-child(7),
-.cr-table-wrap > .cr-dev-table th:nth-child(8) {
-	text-align: right !important;
-}
-.cr-table-wrap > .cr-dev-table th:nth-child(9) {
-	text-align: center !important;
-}
-/* ==== client-rates: 「设备流量」表格列对齐 (end) ==== */
-
-/* ==== client-rates: 首页「端口状态」卡片尺寸 (begin) ==== */
-/* 以 192.168.1.1（argon 2.4.7）的观感为准：卡片固定 100px 宽、整行等距铺开，
-   内边距收紧、流量行强制单行不换行，避免 7 张卡片撑满一行显得笨重。
-   主题自带 minmax(min(100%,8.5rem),1fr) 的栅格带 !important，必须用同款选择器覆盖。 */
-[data-page="admin-status-overview"] #view div:has(> .ifacebox > .ifacebox-body > img[src*="/icons/port_"]),
-[data-page="admin-status"] #view div:has(> .ifacebox > .ifacebox-body > img[src*="/icons/port_"]) {
-	display: flex !important;
-	flex-wrap: wrap !important;
-	justify-content: space-evenly !important;
-	align-items: center !important;
-	gap: 0 !important;
-}
-[data-page="admin-status-overview"] #view .ifacebox:has(.argon-port-traffic),
-[data-page="admin-status"] #view .ifacebox:has(.argon-port-traffic) {
-	width: 100px !important;
-	max-width: 100px !important;
-	margin: .25em !important;
-}
-[data-page="admin-status-overview"] #view .ifacebox:has(.argon-port-traffic) .ifacebox-head,
-[data-page="admin-status"] #view .ifacebox:has(.argon-port-traffic) .ifacebox-head {
-	padding: 3.5px 4px !important;
-	font-size: 14px !important;
-	line-height: 1.3 !important;
-}
-[data-page="admin-status-overview"] #view .ifacebox:has(.argon-port-traffic) .ifacebox-body,
-[data-page="admin-status"] #view .ifacebox:has(.argon-port-traffic) .ifacebox-body {
-	padding: 12px 4px !important;
-}
-[data-page="admin-status-overview"] #view .ifacebox:has(.argon-port-traffic) .ifacebox-body img,
-[data-page="admin-status"] #view .ifacebox:has(.argon-port-traffic) .ifacebox-body img {
-	width: 30px !important;
-	height: 30px !important;
-}
-[data-page="admin-status-overview"] #view .argon-port-traffic,
-[data-page="admin-status"] #view .argon-port-traffic {
-	margin: 0 !important;
-	font-size: 80% !important;
-}
-[data-page="admin-status-overview"] #view .argon-port-traffic > div,
-[data-page="admin-status"] #view .argon-port-traffic > div {
-	flex-wrap: nowrap !important;
-	gap: 4px !important;
-}
-[data-page="admin-status-overview"] #view .argon-port-traffic dt,
-[data-page="admin-status-overview"] #view .argon-port-traffic dd,
-[data-page="admin-status"] #view .argon-port-traffic dt,
-[data-page="admin-status"] #view .argon-port-traffic dd {
-	font-size: 11px !important;
-}
-/* ==== client-rates: 首页「端口状态」卡片尺寸 (end) ==== */
 CR_CUSTOM_CSS
       grep -q "$CR_CSS_MARK" "$f" \
         && echo "    追加完成: $f" || { echo "    [错误] 追加失败: $f"; exit 1; }
@@ -358,21 +229,6 @@ CR_CUSTOM_CSS
   done
 else
   echo "    [警告] 未找到 argon cascade.css, 跳过"
-fi
-
-echo "==== [diy-part2] 首页概览去掉「无线」区块 ===="
-# luci-mod-status 的 view/status/index.js 用 fs.list() 扫描
-#   /www/luci-static/resources/view/status/include/
-# 的目录清单来生成概览区块, 文件名即区块 —— 所以「返回空内容」只会留下一个空的
-# 「无线」标题(容器照样建), 必须让该 include 文件不存在。
-# 这里在 feeds install 之前从 feed 源码里删掉, 打包时就不会落盘;
-# 概览只剩 系统/内存/存储/端口状态/网络/在线主机/DSL/UPnP,
-# 无线状态仍可在「网络 - 无线」页查看。
-WIFI_INC=$(find feeds/luci -path '*/view/status/include/60_wifi.js' -type f 2>/dev/null)
-if [ -n "$WIFI_INC" ]; then
-  echo "$WIFI_INC" | while read -r f; do rm -f "$f"; echo "    已删除: $f"; done
-else
-  echo "    [提示] 未找到 60_wifi.js, 跳过(可能 luci 版本已调整路径)"
 fi
 
 echo "==== [diy-part2] 完成 ===="

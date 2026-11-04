@@ -10,43 +10,27 @@ A template for building OpenWrt with GitHub Actions
 
 ## S20P 固件编译 (本项目)
 
-针对 **Super Gateway S20P** (mediatek / filogic, MT7986A) 的两套云编译，配置与 DIY 脚本按版本分文件夹存放，便于识别与维护：
+针对 **Super Gateway S20P** (mediatek / filogic, MT7986A) 的云编译：
 
 | 版本 | 工作流 | 源码 | 分支 | 设备 | 关键特性 |
 |------|--------|------|------|------|----------|
 | **25.12** | `s20p-25.12-chasey.yml` | chasey-dev/immortalwrt-mt798x-rebase | `25.12` | `clx_s20p` | 闭源 MTK WiFi + HNAT/WARP、mosdns、OpenAppFilter |
-| **24.10** | `s20p-24.10-yuzhii.yml` | Yuzhii0718/immortalwrt-mt798x-6.6-padavanonly | `openwrt-24.10-6.6` | `supergateway_s20p` | 同 25.12 插件 + **wrtbwmon**，闭源 WiFi + MTK 硬件加速强校验 |
 
 目录约定：
 
 ```
 configs/25.12/s20p-chasey-25.12.config   # 25.12 配置 (clx_s20p)
-configs/24.10/s20p-yuzhii-24.10.config   # 24.10 配置 (supergateway_s20p, 含 wrtbwmon)
 diy/25.12/diy-part{1,2}.sh               # 25.12 DIY
-diy/24.10/diy-part{1,2}.sh               # 24.10 DIY
 files/                                   # 公共文件, 构建时合并进固件 /files
 ```
 
 说明：
-- 两套均将根目录 `files/` 合并进固件。
-- **argon 主题与主题设置统一拉取 jerrykuku/luci-theme-argon `v3.1.1`**（v3 起设置页已并入主题包），构建前会清掉源码/feeds 里自带的旧版，避免同名包冲突。
+- 根目录 `files/` 合并进固件。
+- **argon 主题统一拉取 jerrykuku/luci-theme-argon `v3.1.1`**（v3 起设置页已并入主题包），构建前会清掉源码/feeds 里自带的旧版，避免同名包冲突。
   - 默认值：登录页样式 `居中卡片(centered)`、壁纸来源 `Bing`（同时改 `/etc/config/argon` 与 `uci-defaults`）。
-  - 主题 `cascade.css` 在构建时追加 client-rates 的自定义样式（防火墙区域表、设备流量表列对齐、首页端口状态卡片尺寸），带 `==== client-rates:` 标记幂等。
-- `files/` 中的 `client-rates` 页面脚本（设备流量表格 `cr-dev-table` + 窄屏横向滚动）与上面的 CSS 配套。
-- 首页「无线」区块整块移除：LuCI 的 `view/status/index.js` 用 `fs.list()` 扫 `view/status/include/`
-  生成区块（容器在 load 阶段就建好），所以构建时直接从 feed 源码删掉 `60_wifi.js`，而不是覆盖成空。
-  无线详情仍在「网络 → 无线」页。
-- 「在线主机」「设备流量」列表只保留**在线 + 最近 24 小时内出现过的离线设备**（`cr-sampler.uc` 的 `OFFLINE_WIN`，前端按 `last_seen`/`first_seen` 兜底），更早的设备不再输出，避免设备多时列表过长；状态胶囊在线为绿、离线为中性灰。
-- 「在线主机」的 IP 列把 IPv4 / IPv6 叠在一格（上 v4 下 v6）；**上传 / 下载 / 连接数 / 今日流量**四列同样分两行，第一行 IPv4、第二行 IPv6，两行**字号与颜色完全一致**（无 v6 地址显示 `–` 占位，保证行高一致）。「连接方式」夹在「今日流量」与「接收速率」两个右对齐数字列之间，平移量由 `alignLinkCol()` 实时量出两侧文字的中点写进 `--cr-lk-shift`（写死 px 在不同宽度下都会偏心）。
-  IPv6 流量与连接数由 `cr-sampler.uc` 单独采样：conntrack 的 ipv6 行 + HNAT 的 `IPV6_5T_ROUTE` 条目双源相加（硬件加速后 conntrack 计数会冻结，只读它会少算 95% 以上）；归属优先用邻居表/租约建成的地址池反查 MAC，池里没有的临时隐私地址靠 HNAT 学到的「地址 → MAC」缓存与下行表项的 `dmac` 兜底。v6 连接数按「一个 conntrack ipv6 条目算一条」统计，与是否产生字节无关。
-  注意后端的 `up_today`/`down_today` 是 v4+v6 的总量，所以「今日流量」列的 v4 行用「总量 − v6 量」算，两行相加才是设备当日真实流量。
-- 「设备流量」页（`view/client-rates/overview.js`）同样分 v4 / v6 两行：顶部「实时下行 / 实时上行 / 今日总流量」三张卡，以及表格里的 IP 地址、下行、上行、今日下行、今日上行、**连接数**，都是上行 IPv4、下行 IPv6，两行**字号与颜色完全一致**（纯 v4 网络下自动隐藏 IPv6 那行）。
-  WAN 级的 v6 分量由 `cr-sampler.uc` 汇总（`wan.up6/down6/up6_today/down6_today`），v4 用「总量 − v6」反推，所以三张卡与表格逐行相加能对上。整块内容限宽 1800px（≥2000px 视口字号提一档），与首页表格口径一致；≤768px 切卡片视图。
-  实测 50 MB 连续 v6 下载：统计到 49.8 MB（98.1%），差额来自「每条流首次采样只建基线」的那一个采样周期。
-- `cr-sampler.uc` 的采样频率是自适应的：三个前端页面（设备流量、首页在线主机、oaf-bridge）都按 1 秒轮询 `luci.client_rates.status`，rpcd 插件每被调用一次就把时间戳写进 `/tmp/client-rates.watch`；采样器发现心跳在 6 秒内就按 **1 秒**全量采样，心跳停更（页面关掉后自然就停了）降到 **10 秒**，只维持累计量。实测同一台机器：有页面在看时约单核 16%（整机 4%），没人看时约单核 1.8%（整机 0.4%）——一次完整采样要读 conntrack + HNAT 两张内核表并解析，本来就是 60~70 ms 的固定成本。
-  页面刚打开时会立刻插一轮全量采样，并强制刷新 v6 邻居表 / 协商速率 / 无线信号（`force_refresh`），不用等空闲周期走完；从空闲切回活跃的延迟在 1 秒内（空闲时也是每秒醒一次读心跳文件，只读十几字节）。
-  代价：没人看页面时，两次采样之间（最多 10 秒）建立又结束的短连接可能漏计；大流量不受影响，因为两边都是累计计数求差。
-- 24.10 的插件集与 25.12 相同，额外增加 `wrtbwmon`；并在编译前强校验闭源 WiFi (`kmod-mt_wifi`) 与 MTK 硬件加速 (`kmod-mediatek_hnat` / `kmod-warp`) 已启用。
+  - 主题 `cascade.css` 只在构建时追加**防火墙「区域」表格**的排版修正（徽标被拉成整列宽色条、顶到单元格边缘），带 `==== s20p:` 标记幂等。
+- **首页为 LuCI 原版**：不改端口状态卡片尺寸、不删「无线」区块、不动 DHCP 租约区块，也不注入自定义概览卡片。
+- 已移除 24.10 编译项目与「设备流量 / 在线主机」自定义页面（`client-rates` 采样服务一并删除）。
 
 ## Usage
 
