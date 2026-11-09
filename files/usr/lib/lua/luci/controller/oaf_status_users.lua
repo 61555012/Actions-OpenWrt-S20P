@@ -146,15 +146,29 @@ end
 -- 首页快通道：1 秒一次，只给「上行速率 / 下行速率 / 今日流量」三项。
 -- 数据来自 oaf-flowd 的 stats.json，和慢通道 merge 后的数字是同一份，
 -- 两条路不会互相打脸；一次只有几百字节，也不用走 ubus。
+--
+-- 只回传当前这一页的设备：这个接口每秒被叫一次，设备一多（宿舍/办公室
+-- 几十台）整张表全量回传就白搬了 —— 页面上的节点只认眼前这 20 行。
+-- 前端按 data-mac 把在屏 MAC 拼成 macs= 传上来，这里按集合过滤；
+-- 不传（老版本缓存、手工调试）时退回全量，行为不变。
 function api_live_rates()
 	if not traffic then json_out({ list = {} }); return end
 
 	local ok, idx = pcall(traffic.index)
 	if not ok or type(idx) ~= "table" then json_out({ list = {} }); return end
 
+	local want
+	local raw = luci.http.formvalue("macs")
+	if raw and raw ~= "" then
+		want = {}
+		for m in raw:gmatch("[^,]+") do
+			want[normalize_mac(m):upper()] = true
+		end
+	end
+
 	local out = {}
 	for mac, c in pairs(idx) do
-		if type(c) == "table" then
+		if type(c) == "table" and (not want or want[mac]) then
 			out[#out + 1] = {
 				mac               = mac,
 				ip6               = c.ip6 or "",

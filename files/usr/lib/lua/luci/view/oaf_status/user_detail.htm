@@ -600,9 +600,14 @@
 				}
 		}
 		var total_time_str = get_display_time(total_time);
+		// 圆心的统计时间写在 DOM 层上（见 .app-time-center），图表只画圆环
+		var centerEl = document.getElementById('app_time_center');
+		if (centerEl) {
+			centerEl.textContent = total_time_str;
+		}
 		var option = {
 			backgroundColor: 'transparent',
-			animation: true,  
+			animation: !FWX_NARROW,  
 			color: palette,
 			textStyle: {
 				color: themeTextColor  
@@ -617,21 +622,6 @@
 						color: themeTextColor  
 					},
 					left: "2%"
-				},
-				{
-					text: '',
-					subtext: total_time_str,
-					textStyle: {
-						fontSize: 15,
-						color: themeTextColor  
-					},
-					subtextStyle: {
-						fontSize: 15,
-						color: themeTextColor 
-					},
-					textAlign: "center",
-					x: FWX_NARROW ? '50%' : '34.5%',
-					y: FWX_NARROW ? '37%' : '44%',
 				}],
 			tooltip: {
 				trigger: 'item',
@@ -901,7 +891,7 @@
 		var textColor = window.getComputedStyle(document.body).color || '#ffffff';
 		
 		var option = {
-			animation: true,  
+			animation: !FWX_NARROW,  
 			title: {
 				text: '<%:Today Traffic Statistics (24 Hours)%>',
 				left: 'center',
@@ -964,23 +954,20 @@
 			},
 			axisLabel: {
 				color: textColor,
+				/* 单位换算后保留一位小数：原来 1200MB 和 1500MB 都被
+				   Math.round 成「1GB」，纵轴上连着两个 1GB，看不出量级差。
+				   整数就不带小数点（2GB / 1.5GB）。 */
 				formatter: function(value) {
-					if (value === 0) return '0';
-					if (value < 1) {
-						var kb = Math.round(value * 1024);
-						if (kb >= 100) {
-							kb = Math.round(kb / 100) * 100;
-						}
-						return kb + 'KB';
-					} else if (value < 1024) {
-						var mb = Math.round(value);
-						if (mb >= 100) {
-							mb = Math.round(mb / 100) * 100;
-						}
-						return mb + 'MB';
-					} else {
-						return Math.round(value / 1024) + 'GB';
+					if (!value) return '0';
+					if (value >= 1024) {
+						var gb = value / 1024;
+						return (gb >= 10 ? Math.round(gb) : parseFloat(gb.toFixed(1))) + 'GB';
 					}
+					if (value >= 1) {
+						return (value >= 10 ? Math.round(value) : parseFloat(value.toFixed(1))) + 'MB';
+					}
+					var kb = value * 1024;
+					return (kb >= 10 ? Math.round(kb) : parseFloat(kb.toFixed(1))) + 'KB';
 				}
 			},
 			axisLine: {
@@ -1197,7 +1184,7 @@
 		}
 		
 		var option = {
-			animation: true,  
+			animation: !FWX_NARROW,  
 			title: {
 				text: '<%:Today Top Apps Statistics (24 Hours)%>',
 				left: 'center',
@@ -1467,7 +1454,7 @@
 		}
 		var textColor = window.getComputedStyle(document.body).color || '#333';
 		historyChart.setOption({
-			animation: true,
+			animation: !FWX_NARROW,
 				title: { text: '近 30 天流量（MB）', left: 'center', textStyle: { color: textColor, fontSize: 14 } },
 			tooltip: { trigger: 'axis' },
 			legend: { data: ['上行', '下行'], bottom: 0, textStyle: { color: textColor } },
@@ -1675,7 +1662,12 @@
 			
 			<div id="tab-app-duration" class="tab-body">
 				<div class="pie-chart">
-					<div id="app_time_chart" style="width:100%;height: 350px;">
+					<div class="app-time-chart-wrap">
+						<div id="app_time_chart" style="width:100%;height: 350px;"></div>
+						<!-- 圆环正中的「统计时间」用 DOM 贴在圆心，不再走 ECharts 的
+						     title 副标题：那条路的 textAlign 只作用在文本块内部，
+						     实际落点会比圆心偏右几像素，窄屏上尤其明显。 -->
+						<div id="app_time_center" class="app-time-center">--</div>
 					</div>
 				</div>
 			</div>
@@ -1855,6 +1847,26 @@
 		min-width: 600px;
 	}
 
+	/* ---------------------------------------------------------------- APP 统计圆心
+	   圆心在窄屏是 [50%, 37%]、桌面是 [35%, 50%]，这层跟着同一个坐标走，
+	   translate(-50%, -50%) 把文字自身的中心压到圆心上，横竖都不偏。 */
+	.app-time-chart-wrap {
+		position: relative;
+	}
+	.app-time-center {
+		position: absolute;
+		left: 35%;
+		top: 50%;
+		transform: translate(-50%, -50%);
+		z-index: 2;
+		pointer-events: none;
+		font-size: 15px;
+		font-weight: 600;
+		line-height: 1.2;
+		white-space: nowrap;
+		color: var(--text-color-high, #333);
+	}
+	
 /* 基本信息里 IP 那一行只有「标签 + 值」两个单元格，表格却是 4 列，
    右边两列没有 td，行底那条分隔线只画到一半。用一个跨列表格单元把线
    拉通；它不参与列宽计算，所以不会再把 IP 值撑宽。 */
@@ -2099,8 +2111,16 @@
 	.history-day-table .td.up { color: #3b82f6; }
 	.history-day-table .td.down { color: #22c55e; }
 	@media (max-width: 768px) {
-		.history-summary { grid-template-columns: 1fr; gap: 8px; }
-		.history-sum-value { font-size: 17px; }
+		/* 三张汇总卡原来一张一行、竖着叠三层，光指标就吃掉小半屏，
+		   下面 30 天的图得滚动才看得到；窄屏改成一行三列，字号和内边距收一档。 */
+		.history-summary {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 6px;
+			margin-bottom: 12px;
+		}
+		.history-sum-item { padding: 8px 6px; }
+		.history-sum-label { font-size: 11px; margin-bottom: 3px; }
+		.history-sum-value { font-size: 15px; word-break: break-all; }
 		.history-mode-btn { padding: 6px 10px; font-size: 12px; }
 
 		/* 标签栏：不折行会被压成一格一个字，改成可换行的小按钮 */
@@ -2142,6 +2162,12 @@
 		/* 饼图图例横排后要占两行，单独加高一点 */
 		#app_time_chart {
 			height: 360px !important;
+		}
+		/* 窄屏圆心换成 [50%, 37%]，统计时间跟着挪 */
+		.app-time-center {
+			left: 50%;
+			top: 37%;
+			font-size: 14px;
 		}
 
 		/* 基本信息：标签列按内容 auto，每行宽度都不一样，右边的值就跟着乱跳；
@@ -2213,8 +2239,45 @@
 			font-weight: 600;
 			opacity: .65;
 			white-space: nowrap !important;
+			/* 标签行高跟值行拉平（12px / 20px），grid 居中后两者基线才一致 */
+			line-height: 20px;
 		}
 		.user-basic-info-table td:nth-child(even) { font-size: 13px; }
+
+		/* 备注这一格塞了编辑按钮（桌面上是 26px 高 / 230px 宽的 flex），
+		   比普通值行高出一截，把 grid 里整块顶高，标签跟着往下错位。
+		   手机上压到和普通行等高：容器按列宽收缩、控件 20px、文字行高 20px。 */
+		.user-basic-info-table .nickname-inline {
+			width: 100%;
+			max-width: 100%;
+			min-height: 0;
+			height: 20px;
+			gap: 6px;
+		}
+		.user-basic-info-table #basic_info_nickname_text {
+			max-width: calc(100% - 28px);
+			line-height: 20px;
+		}
+		.user-basic-info-table .nickname-edit-btn {
+			flex: 0 0 22px;
+			width: 22px;
+			height: 20px;
+			line-height: 20px;
+		}
+		.user-basic-info-table .nickname-edit-btn svg {
+			width: 17px;
+			height: 17px;
+		}
+		.user-basic-info-table .nickname-confirm-btn {
+			height: 20px;
+			line-height: 20px;
+			padding: 0 8px;
+			font-size: 12px;
+		}
+		.user-basic-info-table .nickname-input {
+			height: 22px;
+			line-height: 20px;
+		}
 
 		/* 访问记录外层也有 1000px 滚动区，手机上同样放开 */
 		.visit-scroll {
@@ -2254,6 +2317,13 @@
 			font-size: 12px;
 			opacity: .72;
 		}
+		/* 时长 / 状态两格原来还是 13px、不透明，和上面两行 12px 的元信息
+		   挤在一张卡里，字号一粗一细看着像没对齐；统一成同一档 */
+		#visit_list_table tr.tr > td:nth-child(4),
+		#visit_list_table tr.tr > td:nth-child(5) {
+			font-size: 12px;
+			opacity: .72;
+		}
 		#visit_list_table tr.tr > td:nth-child(2)::before { content: "开始："; }
 		#visit_list_table tr.tr > td:nth-child(3)::before { content: "最后："; }
 		#visit_list_table tr.tr > td:nth-child(4)::before { content: "时长："; }
@@ -2282,6 +2352,9 @@
 }
 [data-darkmode="true"] .history-sum-label {
 	color: #9aa3ad;
+}
+[data-darkmode="true"] .app-time-center {
+	color: #d8dade;
 }
 [data-darkmode="true"] .tab-item {
 	background-color: rgba(255, 255, 255, 0.06);
