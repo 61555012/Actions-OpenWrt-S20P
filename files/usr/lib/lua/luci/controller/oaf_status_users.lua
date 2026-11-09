@@ -111,6 +111,14 @@ function api_get_all_users()
 							hostname = c.name or "",
 							online   = ((c.flows or 0) > 0) and 1 or 0,
 						}
+						-- 信号列：无线客户端补 libiwinfo 的 RSSI，有线设备
+						-- 留空显示 --（信号列开关来自 system_base_info）
+						if traffic then
+							local ok, w = pcall(traffic.wireless_user, mac)
+							if ok and w and w.rssi then
+								list[total].rssi = w.rssi
+							end
+						end
 					end
 				end
 			end
@@ -173,9 +181,19 @@ function api_get_system_base_info()
 	local resp = fwx("get_system_base_info", {})
 	local data = (resp and resp.code == 2000 and type(resp.data) == "table") and resp.data or {}
 
+	local support = data.wireless_support
+	-- fwx 不在（appfilter 未装、oafd 挂了）时自行探测无线能力：前端靠
+	-- wireless_support 这个键决定画不画信号列，缺了它整列就消失。
+	if support == nil and traffic then
+		local ok, sup = pcall(traffic.wireless_support)
+		if ok then
+			support = sup
+		end
+	end
+
 	json_out({
 		user_session_enable = data.user_session_enable or 0,
-		wireless_support    = data.wireless_support
+		wireless_support    = support
 	})
 end
 
@@ -263,12 +281,12 @@ end
 -- 列表补齐：它带应用名（文件里只有 appid），也能把 flowd 还没同步到的
 -- 最后十几秒补上。
 local VISIT_KEEP_SECONDS = 30 * SECONDS_PER_DAY
--- 数据目录迁移后 flowd 只写 /etc/oaf/data；mmc 上那份是迁移前的旧文件，
--- 停在 08:39，放前面会把它当成最新数据源（列表页的上网时长/30 天记录
--- 就少了后半天的会话）。现用路径必须排第一，mmc 只当兜底。
+-- 只认 flowd 自己的 /etc/oaf/data/visits.json。曾经兜底读过 mmc 数据分区
+-- （/mnt/mmcblk0p6）上迁移前的旧文件——但那块分区刷机不擦，重刷固件后会把
+-- 上一任安装的 30 天访问记录原样带回来（用户以为刷机从 0 开始，列表里却
+-- 全是旧机器的历史），2026-11-09 起废弃该兜底；旧分区已格式化。
 local VISIT_STORE_FILES = {
 	"/etc/oaf/data/visits.json",
-	"/mnt/mmcblk0p6/oaf/data/visits.json",
 }
 
 local function load_visit_store()
@@ -431,7 +449,30 @@ function api_get_user_basic_info(mac)
 		-- 它单独分行显示），叠上去会把 v6 算两遍。
 		json_out(resp.data)
 	else
-		json_out({})
+		-- fwx 不在时的兜底（appfilter 未装 / oafd 挂了）：流量、速率、
+		-- 在线状态、今日上网时长来自 oaf-flowd，无线信息来自 libiwinfo，
+		-- 字段名与 fwx 的 get_user_basic_info 完全一致，前端不用分支。
+		-- 今日在线时长（挂机也算的墙钟时间）只有 oafd 有，兜底给不出，
+		-- 显示为 0；装回 appfilter 后自动恢复 fwx 原值。
+		local d = { mac = target, online = 0 }
+		if traffic then
+			pcall(traffic.merge_user, d)
+			-- 与列表页同一判定：conntrack 里还有这条设备的流就是在网。
+			-- 无线客户端在下面 iwinfo 命中后也会置 1，两条路一致。
+			d.online = ((d.flows or 0) > 0) and 1 or 0
+		end
+		if traffic then
+			local ok, w = pcall(traffic.wireless_user, target)
+			if ok and w then
+				d.band        = w.band
+				d.wifi_ifname = w.ifname
+				d.tx_rate     = w.tx_rate
+				d.rx_rate     = w.rx_rate
+				d.rssi        = w.rssi
+				d.online      = 1
+			end
+		end
+		json_out(d)
 	end
 end
 

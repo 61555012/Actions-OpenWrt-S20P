@@ -161,6 +161,32 @@ jobs:
         fi
         echo "✅ 防火墙 (fw4/nftables) 默认开启校验通过"
 
+    # 强校验: OAF 识别内核必须编译进固件（用户列表插件的 APP 识别数据源）。
+    # 包名 ≠ destan19 目录名: oaf/ 目录定义的是 KernelPackage/oaf（真名
+    # kmod-oaf），open-app-filter/ 目录定义的是 Package/appfilter（真名
+    # appfilter）。名字写错时 make defconfig 会静默丢包——固件照常出包，
+    # 但 oafd 没了，用户列表/访问记录/APP 统计全部空白，必须在这里拦住。
+    - name: Verify OAF recognition kernel
+      run: |
+        cd openwrt
+        ok=1
+        check() {
+          if grep -q "^$1=y" .config; then echo "✅ $1";
+          else echo "❌ $1 未选中 -> OAF 识别内核缺失"; ok=0; fi
+        }
+        check CONFIG_PACKAGE_appfilter
+        check CONFIG_PACKAGE_kmod-oaf
+        if grep -q '^CONFIG_PACKAGE_luci-app-oaf=y' .config; then
+          echo "❌ luci-app-oaf 界面不应启用（已由自研用户列表插件替代）"; ok=0
+        else
+          echo "✅ luci-app-oaf 已排除"
+        fi
+        if [ "$ok" != "1" ]; then
+          echo "❌ OAF 识别内核校验失败, 终止编译"
+          exit 1
+        fi
+        echo "✅ OAF 识别内核 (appfilter + kmod-oaf) 校验通过"
+
     - name: Generate toolchain cache key
       id: cache-key
       run: |

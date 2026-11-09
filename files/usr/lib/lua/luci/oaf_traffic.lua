@@ -152,32 +152,6 @@ end
 -- 清零（今天 09:27 重启后柱状图只剩 1.5MB，而设备实际下行 154M），
 -- 硬件卸载的流量也记不全，所以详情页的今日流量柱状图改用这里的数据。
 local HOURLY = "/tmp/oaf-flow/hourly.json"
-local hour_cache, hour_at = nil, 0
-
-function M.client_hours(mac)
-	if not mac or mac == "" then
-		return nil
-	end
-	local now = os.time()
-	if not hour_cache or now - hour_at >= 2 then
-		hour_at = now
-		hour_cache = read_json(HOURLY)
-		if hour_cache and hour_cache.updated and now - hour_cache.updated > STALE then
-			hour_cache = nil
-		end
-	end
-	-- 只认今天的桶：日期不对（跨天没刷新）就别拿昨天的数冒充
-	if not hour_cache or hour_cache.date ~= os.date("%Y-%m-%d") then
-		return nil
-	end
-	local want = mac:lower()
-	for _, ch in ipairs(hour_cache.clients or {}) do
-		if ((ch.key or ""):lower()) == want then
-			return ch.hours
-		end
-	end
-	return nil
-end
 
 -- whole-LAN picture: today's bytes and the current speed, in bytes
 function M.totals()
@@ -301,6 +275,103 @@ function M.vendor(mac)
 		v = m[(full:gsub(":", "")):sub(1, 6)]
 	end
 	return v
+end
+
+-- 无线客户端信息（信号强度 / 协商速率 / 频段），ubus -> libiwinfo。
+-- fwx(oafd) 活着的时候它也提供同样的字段；它不在（appfilter 未装、
+-- oafd 挂了）时这是唯一来源——没有它，列表页的信号列整列消失、详情页
+-- 的无线信息一栏全空。结果缓存 6 秒；没有无线（或驱动没有 iwinfo 胶水）
+-- 的机器只会得到空表和 support=false，页面照常降级。
+local wl_cache, wl_at, wl_support = nil, 0, nil
+local wl_band, wl_band_at = {}, 0
+
+local function ubus_json(args)
+	local p = io.popen("ubus call " .. args .. " 2>/dev/null")
+	if not p then
+		return nil
+	end
+	local out = p:read("*a")
+	p:close()
+	if out and out ~= "" then
+		local ok, j = pcall(jsonc.parse, out)
+		if ok then
+			return j
+		end
+	end
+	return nil
+end
+
+local function device_band(dev)
+	-- radio 的频段不重新配置就不会变，缓存 10 分钟；按频率判：
+	-- < 3GHz 是 2.4G，到 ~5.9GHz 是 5G，再往上 6G
+	local now = os.time()
+	if wl_band[dev] and now - wl_band_at < 600 then
+		return wl_band[dev]
+	end
+	local info = ubus_json(string.format("iwinfo info '%s'", dev))
+	local band
+	if info and tonumber(info.frequency) then
+		local mhz = tonumber(info.frequency)
+		if mhz < 3000 then
+			band = "2g"
+		elseif mhz < 5900 then
+			band = "5g"
+		else
+			band = "6g"
+		end
+		wl_band[dev] = band
+		wl_band_at = now
+	end
+	return band
+end
+
+-- map[MAC] = { rssi, tx_rate, rx_rate, ifname, band }。速率单位 kbit/s，
+-- 与 fwx 一致（前端除以 1000 显示 Mbit/s）。apcli*/apclix* 是中继模式的
+-- 上联口，不会挂我们的局域网客户端，跳过。
+function M.wireless()
+	local now = os.time()
+	if wl_cache and now - wl_at < 6 then
+		return wl_cache, wl_support
+	end
+	wl_at = now
+	local out, support = {}, false
+	local devices = ubus_json("iwinfo devices")
+	for _, dev in ipairs((type(devices) == "table" and devices.devices) or {}) do
+		if type(dev) == "string" and dev:sub(1, 5) ~= "apcli" then
+			support = true
+			local band = device_band(dev)
+			local al = ubus_json(string.format("iwinfo assoclist '%s'", dev))
+			for _, st in ipairs((al and al.results) or {}) do
+				local mac = tostring(st.mac or ""):upper()
+				if mac ~= "" then
+					out[mac] = {
+						rssi    = tonumber(st.signal),
+						tx_rate = st.tx and tonumber(st.tx.rate) or nil,
+						rx_rate = st.rx and tonumber(st.rx.rate) or nil,
+						ifname  = dev,
+						band    = band,
+					}
+				end
+			end
+		end
+	end
+	wl_cache, wl_support = out, support
+	return out, support
+end
+
+-- 列表页信号列的开关（get_system_base_info 的 wireless_support 兜底）
+function M.wireless_support()
+	M.wireless()
+	return wl_support
+end
+
+-- 单个客户端的无线信息；不在任何 radio 的 assoclist 里（有线设备）返回 nil
+function M.wireless_user(mac)
+	local w = M.wireless()
+	if not w or not mac then
+		return nil
+	end
+	return w[mac_key(mac)]
 end
 
 -- A link-local address only repeats the MAC in another notation, so it is
