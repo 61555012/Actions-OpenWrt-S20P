@@ -20,7 +20,13 @@ local jsonc = require "luci.jsonc"
 
 local STATS  = "/tmp/oaf-flow/stats.json"
 local HOURLY = "/tmp/oaf-flow/hourly.json"
-local VENDORS = "/tmp/oaf-flow/vendors.json"
+-- 厂商表按顺序探测：旧的 tmpfs 文件是早期手工转换的（整条 MAC 或
+-- "04:7C:16" 形式的前缀做键，重启就丢）；usr/share 下是随插件安装的
+-- 全量平面表（8712 个 OUI 前缀，6 位去冒号十六进制做键），刷机即有。
+local VENDOR_FILES = {
+	"/usr/share/oaf_status/vendors.json",
+	"/tmp/oaf-flow/vendors.json",
+}
 local WATCH  = "/tmp/oaf-flow/watched"
 local STALE  = 45   -- a snapshot older than this means oaf-flowd is gone
 
@@ -268,13 +274,15 @@ function M.vendors()
 		return vendors
 	end
 	ven_at = now
-	local v = read_json(VENDORS)
-	if v and type(v.macs) == "table" then
-		vendors = v.macs
-	else
-		vendors = nil
+	for _, path in ipairs(VENDOR_FILES) do
+		local v = read_json(path)
+		if v and type(v.macs) == "table" and next(v.macs) then
+			vendors = v.macs
+			return vendors
+		end
 	end
-	return vendors
+	vendors = nil
+	return nil
 end
 
 function M.vendor(mac)
@@ -282,7 +290,17 @@ function M.vendor(mac)
 	if not m then
 		return nil
 	end
-	return m[mac_key(mac)]
+	local full = mac_key(mac)
+	-- 三种键形态都兼容：整条 MAC（旧 tmpfs 手工表）、"04:7C:16"（冒号
+	-- 前缀）、"047C16"（平面表的 6 位十六进制）。命中即返回。
+	local v = m[full]
+	if v == nil then
+		v = m[full:sub(1, 8)]
+	end
+	if v == nil then
+		v = m[(full:gsub(":", "")):sub(1, 6)]
+	end
+	return v
 end
 
 -- A link-local address only repeats the MAC in another notation, so it is

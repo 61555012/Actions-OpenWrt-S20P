@@ -94,7 +94,44 @@ function api_get_all_users()
 		end
 		json_out({ data = resp.data })
 	else
-		json_out({ data = { list = {}, total_num = 0, total_page = 1, page = 1 } })
+		-- fwx/oafd 不可用（appfilter 包未装、oafd 未启动或 ubus 超时）的兜底：
+		-- 直接用 oaf-flowd 的设备表出列表。流量/速率/在线状态/上网时长/OUI
+		-- 厂商都齐全；APP 识别相关字段（app_id/app/app_icon/nickname）只能
+		-- 留空，装回 appfilter 包或 oafd 恢复后自动回到主路。
+		local list, total = {}, 0
+		if traffic then
+			local ok, idx = pcall(traffic.index)
+			if ok and type(idx) == "table" then
+				for mac, c in pairs(idx) do
+					if type(c) == "table" and mac and mac ~= "" then
+						total = total + 1
+						list[total] = {
+							mac      = mac,
+							ip       = "",
+							hostname = c.name or "",
+							online   = ((c.flows or 0) > 0) and 1 or 0,
+						}
+					end
+				end
+			end
+		end
+		if total > 0 then
+			if traffic then pcall(traffic.merge_list, list) end
+			if override_usage_times then pcall(override_usage_times, list) end
+			table.sort(list, function(a, b)
+				local da = (a.today_down_bytes or 0) + (a.today_up_bytes or 0)
+				local db = (b.today_down_bytes or 0) + (b.today_up_bytes or 0)
+				if da == db then return (a.ip or "") < (b.ip or "") end
+				return da > db
+			end)
+		end
+		local total_page = math.max(1, math.ceil(total / page_size))
+		local out = {}
+		for i = 1, page_size do
+			local row = list[(page - 1) * page_size + i]
+			if row then out[#out + 1] = row end
+		end
+		json_out({ data = { list = out, total_num = total, total_page = total_page, page = page } })
 	end
 end
 
