@@ -18,10 +18,14 @@ echo "==== [diy-part2] 清理源码中已有的 v2ray-geodata / mosdns ===="
 find ./ | grep Makefile | grep v2ray-geodata | xargs -r rm -f
 find ./ | grep Makefile | grep mosdns | xargs -r rm -f
 
-echo "==== [diy-part2] 删除仓库原有 OpenAppFilter, 重新拉取 destan19 最新版 ===="
+echo "==== [diy-part2] OAF 识别内核: 只留 oaf.ko + open-app-filter, 删除 luci-app-oaf 界面 ===="
 find . -type d \( -name "OpenAppFilter" -o -name "luci-app-oaf" -o -name "open-app-filter" \) -exec rm -rf {} +
 rm -rf package/feeds/*/luci-app-oaf package/feeds/*/OpenAppFilter
 git clone https://github.com/destan19/OpenAppFilter package/OpenAppFilter
+# luci-app-oaf 界面已由自研「状态 → 用户列表」插件(files/ 内)替代, 删掉避免菜单重复;
+# oaf 内核模块写 conntrack 标记、open-app-filter(oafd) 维护访问记录库,
+# 是用户列表插件 APP 统计 / 访问记录 / APP 时长的唯一数据源, 必须保留。
+rm -rf package/OpenAppFilter/luci-app-oaf
 
 echo "==== [diy-part2] 克隆 luci-app-mosdns (v5) 与 v2ray-geodata ===="
 git clone https://github.com/sbwml/luci-app-mosdns -b v5 package/mosdns

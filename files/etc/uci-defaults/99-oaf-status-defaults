@@ -1,0 +1,17 @@
+#!/bin/sh
+# oaf-status（用户列表插件）默认设置
+# 固件首次启动时执行一次（files/ 合并后 init.d 已就位）。
+
+# 1) oaf-flowd 采样器默认开机自启
+if [ -x /etc/init.d/oaf-flowd ]; then
+	/etc/init.d/oaf-flowd enable
+fi
+
+# 2) 网络-网络加速: 默认启用 MediaTek HNAT 引擎并打开「HNAT 连接计数更新」。
+#    HNAT 硬件卸载后连接计数默认冻结在 conntrack 里, 不回写的话
+#    用户列表的流量统计会少算 95% 以上(只统计到未卸载的少数流)。
+uci -q get turboacc.config >/dev/null 2>&1 || uci -q set turboacc.config=turboacc
+uci -q set turboacc.config.fastpath='mediatek_hnat'
+uci -q set turboacc.config.fastpath_mh_bind_rate='30'
+uci -q set turboacc.config.fastpath_mh_update_nfct='1'
+uci -q commit turboacc
