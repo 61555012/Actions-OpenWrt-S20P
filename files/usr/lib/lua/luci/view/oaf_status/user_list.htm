@@ -2788,8 +2788,8 @@
 }
 
 /* ---------------------------------------------------------------- 列对齐（照 1.1 参考页）
-   上行速率 / 下行速率 / 上网流量：表头居中，三列数值也居中，两边同一条中线。
-   v6 那枚紫色小标签仍绝对定位挂在数字左侧，不占布局，v4/v6 两行数字同一条竖线。 */
+   速率 / 流量这几列数值居中，v6 那枚紫色小标签仍绝对定位挂在数字左侧，
+   不占布局，v4/v6 两行数字同一条竖线。表头整行统一居中见文件末尾那条规则。 */
 #user_status_table .th.user-col-up-rate,
 #user_status_table .th.user-col-down-rate,
 #user_status_table .th.user-col-traffic {
@@ -2863,6 +2863,56 @@
 .user-card .rssi-fair { color: #f59e0b; }
 #user_status_table .rssi-bad,
 .user-card .rssi-bad { color: #ef4444; }
+
+/* ---------------------------------------------------------------- 表头整行居中
+   之前只有速率 / 流量 / 连接数 / 操作这几列表头是居中的，上网时长 /
+   信号强度 / 应用 / URL / 状态还是左对齐，一整行标题有齐有散。
+   现在按单元格中线居中；同时把表头左右内边距拉平——「上网时长」原来
+   42px 的左内边距会把居中后的文字推到列中心右侧 20px，「上网流量」的
+   14px 右内边距同理。终端 / IP / 应用 / URL 四列是长文本，单独回到左对齐
+   （见下面一条）。选择器特异性高于上面所有单列规则，且放在最后，避免
+   又被主题/响应式规则改回左对齐。 */
+#user_status_table tr:first-child > th.th {
+	text-align: center !important;
+	vertical-align: middle !important;
+	padding-left: 8px !important;
+	padding-right: 8px !important;
+}
+/* 短值列的内容也跟着居中，标题才真正压在内容中线上。「上网时长」原来
+   42px 的左内边距是给左对齐时代留的间距，居中后会把值推到中线右边，
+   这里一并拉平。 */
+#user_status_table tr.tr > td.td.user-col-net-time,
+#user_status_table tr.tr > td.td.user-col-signal,
+#user_status_table tr.tr > td.td.user-col-status {
+	text-align: center !important;
+	vertical-align: middle !important;
+}
+#user_status_table tr.tr > td.td.user-col-net-time {
+	padding-left: 8px !important;
+	padding-right: 8px !important;
+}
+
+/* ---------------------------------------------------------------- 长文本列靠左
+   终端 / IP / 应用 / URL 的内容是名称、地址、图标、网址，本来就贴着单元
+   格左缘排。表头也跟着靠到同一条左线上，标题与内容不再一左一中。
+   左右内边距跟数据格统一成 10px（见上面 #user_status_table .th/.td），
+   标题和第一行内容才严丝合缝地对齐。放在文件最后，压过整行居中规则。 */
+#user_status_table tr:first-child > th.th.user-col-device,
+#user_status_table tr:first-child > th.th.user-col-ip,
+#user_status_table tr:first-child > th.th.user-col-apps,
+#user_status_table tr:first-child > th.th.user-col-url,
+#user_status_table tr.tr > td.td.user-col-device,
+#user_status_table tr.tr > td.td.user-col-ip,
+#user_status_table tr.tr > td.td.user-col-apps,
+#user_status_table tr.tr > td.td.user-col-url {
+	text-align: left !important;
+	padding-left: 10px !important;
+}
+/* 终端列贴着卡片左沿太紧：标题与图标/名称一起右移 8px，仍共用同一条左线。 */
+#user_status_table tr:first-child > th.th.user-col-device,
+#user_status_table tr.tr > td.td.user-col-device {
+	padding-left: 18px !important;
+}
 
 /* ---------------------------------------------------------------- 整页滚动
    .user-status-content 上带内联 max-height:1000px + overflow-y:auto，

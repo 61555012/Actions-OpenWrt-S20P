@@ -109,6 +109,10 @@ local function build_index(s)
 				-- 今天有流量累计了多少秒。fwx 的那个值在本固件上是个常数，
 				-- 采样器自己数，页面才有东西可更新。
 				day_active = c.day_active or 0,
+				-- 今天"接到网络"了多少秒（conntrack 有流，或 br-lan 上有
+				-- reachable 的 ARP 邻居，空闲设备也算）。flowd 1.9.2+；
+				-- 旧版本没有该字段读 0。
+				day_online = c.day_online or 0,
 				-- IPv6 side of the same device: the counters are an exact
 				-- share of the totals above (a flow is entirely one family),
 				-- and ip6 is the one address worth showing
@@ -473,6 +477,16 @@ function M.merge_user(u)
 	-- 挂机长连接又能推到 100+ 分钟，两头都不对）。设备不在采样器里
 	-- （刚接入、tmpfs 过期）时保持 fwx 原值。
 	u.today_active_time = c.day_active or 0
+	-- 今日在线时长 = 设备接到网络的墙钟时间，必然 >= 上网时长。
+	-- fwx（oafd）在时它给的是会话口径，flowd 给的是在网口径，两者取大的；
+	-- 两者都没有（旧采样器、刚接入）时，用上网时长兜底——上过网的每一秒
+	-- 一定是在网的，绝不能出现「上网 59m / 在线 3m」这种倒挂。
+	-- 之前只在 fwx 值为 0 时才用 flowd，重启后 flowd 的在线计数重新从 0
+	-- 起算、上网时长却从日文件恢复，于是一直被这个 0 挡住。
+	local online = tonumber(u.today_online_time) or 0
+	if (c.day_online or 0) > online then online = c.day_online end
+	if (c.day_active or 0) > online then online = c.day_active end
+	u.today_online_time = online
 	u.up_rate6 = c.rate_up6
 	u.down_rate6 = c.rate_down6
 	u.today_up6_bytes = c.today_up6

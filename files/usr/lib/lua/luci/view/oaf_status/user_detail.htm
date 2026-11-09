@@ -1760,7 +1760,9 @@
 	.user-detail-header {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		/* 标题以内容区为基准水平居中：返回按钮固定在左，标题绝对定位到
+		   整行的中点，与下方表格/图表的视觉中线对齐 */
+		position: relative;
 		margin-bottom: 20px;
 	}
 
@@ -1793,6 +1795,14 @@
 	.user-detail-title {
 		margin: 0;
 		color: inherit;
+		position: absolute;
+		left: 50%;
+		transform: translateX(-50%);
+		white-space: nowrap;
+		/* 窄屏给返回按钮留出位置，超长就省略号 */
+		max-width: calc(100% - 150px);
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.tab-container {
@@ -1853,6 +1863,32 @@
 	border-left: 0 !important;
 	line-height: 0 !important;
 }
+
+/* 基本信息最后一行「无线发送速率 / 无线接收速率」下面原本叠了两层留白：
+   tab-body 的 5px 下内边距 + 外层面板 20px 下内边距，等于凭空多出一行。
+   这里把 tab 自己的下内边距清零，再用负外边距把面板底边收回来，只留
+   6px 收口。规则只挂在基本信息 Tab 上，切到图表 Tab 时留白不受影响。 */
+#tab-user-info.tab-body {
+	padding-bottom: 0 !important;
+	margin-bottom: -14px !important;
+}
+
+/* ---------------------------------------------------------------- 基本信息列宽
+   表格原本 table-layout:auto，列宽随最长内容浮动：两个标签列被撑到 228px，
+   两个值列一个 295px 一个 550px，「无线发送速率」这种长标签看起来比
+   「频段」那行占得更宽、值也离标签太远。桌面端把四列锁死：两个标签列
+   各 160px、严格等宽，值列平分剩余宽度；最长的 6 字标签约 84px 加
+   20px 内边距仍单行显示，42px 行高不变。窄屏的两列网格不受影响。 */
+@media (min-width: 769px) {
+	.user-basic-info-table {
+		table-layout: fixed !important;
+	}
+	.user-basic-info-table tr.tr > td.td:nth-child(1):not(.basic-info-filler),
+	.user-basic-info-table tr.tr > td.td:nth-child(3):not(.basic-info-filler) {
+		width: 160px !important;
+		min-width: 160px !important;
+	}
+}
 @media (max-width: 768px) {
 	/* 窄屏下这张表变成两列网格，补位单元格会多占一行，直接藏掉 */
 	.user-basic-info-table .td.basic-info-filler {
@@ -1898,6 +1934,44 @@
 	   值一列竖线（窄屏 grid 本来就是左对齐）。 */
 	.user-basic-info-table .td {
 		text-align: left !important;
+	}
+
+	/* 基本信息所有行等高：备注那一格塞了编辑按钮/输入框，比纯文字行高
+	   一截，隔行看起来像被撑开。行与单元格都定死 42px、垂直居中，备注
+	   的控件统一到 24px，编辑态也不会把整行顶高。窄屏走两列网格，见
+	   下面 max-width:768px 里的单独规则。 */
+	@media (min-width: 769px) {
+		.user-basic-info-table tr.tr {
+			height: 42px;
+		}
+		.user-basic-info-table td.td {
+			height: 42px;
+			box-sizing: border-box;
+			padding-top: 6px !important;
+			padding-bottom: 6px !important;
+			line-height: 20px;
+			vertical-align: middle !important;
+		}
+		/* IP 行的补位格只用来把分隔线拉通，别跟着一起加内边距 */
+		.user-basic-info-table td.td.basic-info-filler {
+			padding-top: 0 !important;
+			padding-bottom: 0 !important;
+			line-height: 0 !important;
+		}
+		.user-basic-info-table .nickname-inline {
+			height: 24px;
+			min-height: 24px;
+		}
+		.user-basic-info-table .nickname-edit-btn,
+		.user-basic-info-table .nickname-confirm-btn {
+			height: 24px;
+			line-height: 24px;
+		}
+		.user-basic-info-table .nickname-input {
+			height: 24px;
+			line-height: 18px;
+			box-sizing: border-box;
+		}
 	}
 
 
@@ -2121,6 +2195,8 @@
 			grid-template-columns: 86px minmax(0, 1fr);
 			gap: 6px 10px;
 			padding: 9px 10px;
+			min-height: 42px;
+			align-items: center;
 			border-bottom: 1px solid var(--border-color-low, #e5e7eb);
 		}
 		.user-basic-info-table td {

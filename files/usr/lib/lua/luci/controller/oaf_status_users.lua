@@ -452,8 +452,8 @@ function api_get_user_basic_info(mac)
 		-- fwx 不在时的兜底（appfilter 未装 / oafd 挂了）：流量、速率、
 		-- 在线状态、今日上网时长来自 oaf-flowd，无线信息来自 libiwinfo，
 		-- 字段名与 fwx 的 get_user_basic_info 完全一致，前端不用分支。
-		-- 今日在线时长（挂机也算的墙钟时间）只有 oafd 有，兜底给不出，
-		-- 显示为 0；装回 appfilter 后自动恢复 fwx 原值。
+		-- 今日在线时长由 merge_user 用 flowd 的在网秒数补齐，并保证
+		-- 不小于上网时长；装回 appfilter 后会自动取 fwx 与 flowd 的较大值。
 		local d = { mac = target, online = 0 }
 		if traffic then
 			pcall(traffic.merge_user, d)
@@ -520,17 +520,18 @@ function api_dev_visit_time(mac)
 	if act and next(act.apps) ~= nil then
 		local merged = {}
 		for id, t in pairs(act.apps) do
-			-- conntrack mark 为 0、以及 559 条内置表之外的 appid（VIP 特征
-			-- 库里偶尔冒出来的），都并进同一条「其他」——饼图上不再出现
-			-- 没有名字的独立扇区，合计仍等于设备上网时长
+			-- 仅显示已知特征应用：conntrack mark 为 0（识别内核不在、或该
+			-- 流还没被分类）、以及内置 559 条表之外认不出的 appid，直接
+			-- 跳过——页面上不出现说不清来路的「其他」大扇区
 			local nm = id > 0 and names[tostring(id)] or nil
-			local key = nm and id or 0
-			local slot = merged[key]
-			if not slot then
-				slot = { id = key, t = 0, name = nm or "其他" }
-				merged[key] = slot
+			if nm then
+				local slot = merged[id]
+				if not slot then
+					slot = { id = id, t = 0, name = nm }
+					merged[id] = slot
+				end
+				slot.t = slot.t + t
 			end
-			slot.t = slot.t + t
 		end
 		local out = {}
 		for _, slot in pairs(merged) do out[#out + 1] = slot end
@@ -543,17 +544,18 @@ function api_dev_visit_time(mac)
 	local sums, order = {}, {}
 	for _, rec in ipairs(all) do
 		local id = tonumber(rec.id) or 0
-		if id > 0 then
+		-- 同主路：内置表认不出、记录里也没有名字的 appid 一律不算已知应用
+		local nm = (id > 0 and names[tostring(id)])
+			or (rec.name and rec.name ~= "" and rec.name)
+			or nil
+		if id > 0 and nm then
 			local slot = sums[id]
 			if not slot then
-				slot = { id = id, icon = rec.icon, name = rec.name, t = 0 }
+				slot = { id = id, icon = rec.icon, name = nm, t = 0 }
 				sums[id] = slot
 				order[#order + 1] = id
 			end
 			slot.t = slot.t + (tonumber(rec.tt) or 0)
-			if (not slot.name or slot.name == "") and rec.name and rec.name ~= "" then
-				slot.name = rec.name
-			end
 		end
 	end
 	table.sort(order, function(a, b) return sums[a].t > sums[b].t end)
