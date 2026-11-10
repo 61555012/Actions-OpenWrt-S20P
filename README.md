@@ -14,7 +14,7 @@ A template for building OpenWrt with GitHub Actions
 
 | 版本 | 工作流 | 源码 | 分支 | 设备 | 关键特性 |
 |------|--------|------|------|------|----------|
-| **25.12** | `s20p-25.12-chasey.yml` | chasey-dev/immortalwrt-mt798x-rebase | `25.12` | `clx_s20p` | 闭源 MTK WiFi + HNAT/WARP、mosdns、OAF 识别内核（用户列表插件） |
+| **25.12** | `s20p-25.12-chasey.yml` | chasey-dev/immortalwrt-mt798x-rebase | `25.12` | `clx_s20p` | 闭源 MTK WiFi + HNAT/WARP、OAF 识别内核（用户列表插件）、首页 CPU 实时采样 |
 
 目录约定：
 
@@ -36,6 +36,14 @@ files/                                   # 公共文件, 构建时合并进固�
   - 默认值：登录页样式 `居中卡片(centered)`、壁纸来源 `Bing`（同时改 `/etc/config/argon` 与 `uci-defaults`）。
   - 主题 `cascade.css` 只在构建时追加**防火墙「区域」表格**的排版修正（徽标被拉成整列宽色条、顶到单元格边缘），带 `==== s20p:` 标记幂等。
 - **首页为 LuCI 原版**：不改端口状态卡片尺寸、不删「无线」区块、不动 DHCP 租约区块，也不注入自定义概览卡片。
+- **首页 CPU 占用改为实时采样**（`files/` 覆盖上游两个文件，与 Actions-OpenWrt-ponwrt 同一实现）：
+  - 上游 `luci.getCPUUsage` 是 `top -n1 | awk '/^CPU/ {printf("%d%", 100 - $8)}'`，单次运行窗口只有约 0.1 秒，而 **fork `top` + ubus 往返本身**就要吃掉其中一部分，所以空闲时也恒定显示 3~5%，既不归零也不随负载变化。
+  - 改为 `/proc/stat` 增量差分：跨两次调用（前端 3 秒轮询）取差值，再从 busy 里**扣掉 rpcd 处理该 RPC 自身消耗的** `utime+stime+cutime+cstime`（`/proc/self/stat`，ucode 方法在 rpcd 进程内执行），不扣就会被测量动作顶成 1~2% 的固定读数。
+  - 超过 10 秒无调用（关掉页面再打开）丢弃缓存，退化为 200ms 短采样，保证首屏是当前值而不是长期平均。
+  - 前端 `10_system.js` 用 `poll.add(fn, 3)` 只更新 `CPU usage (%)` 那一格；回调先查 `el.isConnected` / `el.offsetParent` / `document.hidden`，页面不可见就不发 RPC。
+  - 页面只显示纯百分比（`0%`），不带 `CPU:` 前缀。实测 4 核：空闲 `0%`，1/2/3/4 核满载 `25% / 50% / 75% / 100%`。
+  - 编译前工作流会校验这两个文件存在、是实时采样版本、无额外前缀、且带轮询与可见性判断。
+- **mosdns 已移除**（2026-11）：连带去掉 sbwml 26.x golang feed 替换、`luci-app-mosdns`(v5) 与 `v2ray-geodata` 的源码克隆；`configs/25.12` 里三个包显式 `is not set`，工作流编译前有 `absent` 断言防止被基线/feeds 带回来。
 - 已移除 24.10 编译项目与「设备流量 / 在线主机」自定义页面（`client-rates` 采样服务一并删除）。
 
 ## Usage

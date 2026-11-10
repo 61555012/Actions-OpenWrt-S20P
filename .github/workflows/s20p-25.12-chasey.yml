@@ -5,7 +5,6 @@
 # 配置:     configs/25.12/s20p-chasey-25.12.config
 # DIY:      diy/25.12/diy-part{1,2}.sh
 # 特性:
-#   - mosdns (sbwml 26.x golang feed + luci-app-mosdns v5 + v2ray-geodata)
 #   - OpenAppFilter (删除源码自带, 重拉 destan19 最新版)
 #   - argon 主题 + 主题设置: 拉取 jerrykuku v3.1.1 (默认居中登录页 + Bing 壁纸)
 #   - 修复 2.5G 口 LED (dts-ext/mt7986a-clx-s20p.dts: 0x001b -> 0x321b)
@@ -132,6 +131,54 @@ jobs:
           exit 1
         fi
         echo "✅ 目标机型校验通过: mediatek/filogic/clx_s20p"
+
+    # 校验: overview 的 CPU 占用改成实时采样（files/ 覆盖 rpcd ucode + overview 视图）
+    # 与 Actions-OpenWrt-ponwrt 同一套实现，两边 UI 一致（只显示纯百分比）
+    - name: Verify realtime CPU usage overlay
+      run: |
+        ok=1
+        for f in usr/share/rpcd/ucode/luci \
+                 www/luci-static/resources/view/status/include/10_system.js; do
+          if [ -f "files/$f" ]; then echo "✅ files/$f"; else echo "❌ 缺少 files/$f"; ok=0; fi
+        done
+        if grep -q 'function selfTicks' files/usr/share/rpcd/ucode/luci 2>/dev/null &&
+           grep -q "sprintf('%d%%'" files/usr/share/rpcd/ucode/luci 2>/dev/null; then
+          echo "✅ getCPUUsage 为实时采样（已扣除采样器自身占用）"
+        else
+          echo "❌ files/usr/share/rpcd/ucode/luci 不是实时 CPU 采样版本"; ok=0
+        fi
+        if grep -q 'PPE:' files/usr/share/rpcd/ucode/luci 2>/dev/null ||
+           grep -q "sprintf('CPU" files/usr/share/rpcd/ucode/luci 2>/dev/null; then
+          echo "❌ CPU 行带了额外前缀（应只显示 0% 这样的纯百分比）"; ok=0
+        else
+          echo "✅ CPU 行只显示纯百分比（无 CPU: / PPE 前缀）"
+        fi
+        if grep -q 'poll.add' files/www/luci-static/resources/view/status/include/10_system.js 2>/dev/null &&
+           grep -q 'document.hidden' files/www/luci-static/resources/view/status/include/10_system.js 2>/dev/null; then
+          echo "✅ overview 的 CPU 行 3 秒轮询 + 页面不可见时停采"
+        else
+          echo "❌ 10_system.js 缺少轮询或可见性判断"; ok=0
+        fi
+        [ "$ok" = "1" ] || exit 1
+
+    # 校验: mosdns 已移除（连带 Go 工具链替换与 v2ray-geodata），不能被带回来
+    - name: Verify mosdns removed
+      run: |
+        cd openwrt
+        ok=1
+        absent() {
+          if grep -qE "^$1=[ym]" .config; then echo "❌ $1 仍被选中"; ok=0;
+          else echo "✅ $1 未选中"; fi
+        }
+        absent CONFIG_PACKAGE_mosdns
+        absent CONFIG_PACKAGE_luci-app-mosdns
+        absent CONFIG_PACKAGE_v2ray-geodata
+        if [ -d package/mosdns ] || [ -d package/v2ray-geodata ]; then
+          echo "❌ package/ 下仍有 mosdns / v2ray-geodata 源码"; ok=0
+        else
+          echo "✅ package/ 下无 mosdns / v2ray-geodata 源码"
+        fi
+        [ "$ok" = "1" ] || exit 1
 
     # 强校验: 防火墙必须默认全开 (fw4 / nftables)
     - name: Verify firewall enabled
@@ -348,9 +395,7 @@ jobs:
         cd openwrt
         make download -j8 || make download -j1 V=s
         # 只清 dl 顶层的失败下载残留(HTML 错误页之类)。
-        # 必须加 -maxdepth 1: dl/go-mod-cache 里有大量小于 1KB 的合法 .go/.mod 文件,
-        # 递归清理会把 Go 模块缓存删残, 编译 mosdns 时报
-        # "no required module provides package .../internal/xxx" / "build constraints exclude all Go files"
+        # 必须加 -maxdepth 1: 递归清理会误删 dl 下 .go/.mod 一类的合法小文件。
         find dl -maxdepth 1 -size -1024c -exec ls -l {} \;
         find dl -maxdepth 1 -size -1024c -exec rm -f {} \;
 
@@ -406,7 +451,7 @@ jobs:
           echo "| 源码 | $REPO_URL |"
           echo "| 分支 | $REPO_BRANCH |"
           echo "| 设备 | clx_s20p / filogic |"
-          echo "| 插件 | mosdns + OpenAppFilter |"
+          echo "| 插件 | OpenAppFilter（用户列表 / APP 识别） |"
           echo "| LED  | 2.5G 口已修复 |"
           echo "| 时间 | $(date '+%Y-%m-%d %H:%M:%S') (Shanghai) |"
         } > release.txt

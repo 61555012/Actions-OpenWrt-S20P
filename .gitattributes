@@ -1,0 +1,9 @@
+# 直接合并进固件根目录的文件，必须原样保持 LF：
+# ucode 脚本与 LuCI 前端不带 CRLF，避免在 Windows 上编辑后被 autocrlf 改写。
+files/usr/share/rpcd/ucode/luci text eol=lf
+files/www/luci-static/resources/view/status/include/10_system.js text eol=lf
+
+# 二进制文件不做任何换行/文本转换
+*.png binary
+*.bin binary
+*.itb binary
