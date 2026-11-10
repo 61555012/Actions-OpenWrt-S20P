@@ -2,14 +2,22 @@
 # oaf-status（用户列表插件）默认设置
 # 固件首次启动时执行一次（files/ 合并后 init.d 已就位）。
 
-# 1) oaf-flowd 采样器默认开机自启
+# 1) 统计目录预建。
+#    oaf-flowd 只往已存在的 day/ mon/ 里写文件，不会自建；
+#    目录缺了它照跑，但只在内存里计数、一个字节都不落盘（历史/月流量永远 0）。
+#    init 脚本已经每次拉起都 mkdir，这里再建一次是给「首启时 init 还没跑」兜底。
+mkdir -p /etc/oaf/data/day /etc/oaf/data/mon /tmp/oaf
+
+# 2) oaf-flowd 采样器默认开机自启
 if [ -x /etc/init.d/oaf-flowd ]; then
 	/etc/init.d/oaf-flowd enable
 fi
 
-# 2) 网络-网络加速: 默认启用 MediaTek HNAT 引擎并打开「HNAT 连接计数更新」。
+# 3) 网络-网络加速: 默认启用 MediaTek HNAT 引擎并打开「HNAT 连接计数更新」。
 #    HNAT 硬件卸载后连接计数默认冻结在 conntrack 里, 不回写的话
 #    用户列表的流量统计会少算 95% 以上(只统计到未卸载的少数流)。
+#    这是 MediaTek 专属分支：本机 S20P(mt7986a) 走 turboacc + HNAT，
+#    Airoha 机型没有 turboacc，靠 fw4 flowtable + PPE 与内核 FIN 老化补丁。
 uci -q get turboacc.config >/dev/null 2>&1 || uci -q set turboacc.config=turboacc
 uci -q set turboacc.config.fastpath='mediatek_hnat'
 uci -q set turboacc.config.fastpath_mh_bind_rate='30'

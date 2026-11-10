@@ -17,10 +17,9 @@ if not ok_tr then traffic = nil end
 
 local SECONDS_PER_DAY = 86400
 
--- OAF 的客户端统计目录：1.7.5 起 fwx 被 uci 指到 eMMC 大分区，
--- 老固件仍是 tmpfs 上的 /tmp/oaf 或 /tmp/fwx
+-- OAF 的客户端统计目录：fwx(oafd) 的 base_data_path 就指向 tmpfs 上的
+-- /tmp/oaf（旧版本叫 /tmp/fwx），这里只认这两处，没有外挂分区路径。
 local DATA_ROOTS = {
-	"/mnt/mmcblk0p6/oaf-store/client_data",
 	"/tmp/oaf/client_data",
 	"/tmp/fwx/client_data",
 }
@@ -223,11 +222,10 @@ end
 -- ---------------------------------------------------------------- 终端详情
 
 -- 名字只能从 fwx 拿到（它的库里只存 appid，名字是它跟云端问的），所以学到
--- 一次就落盘。放 mmc 上是为了跨重启累积：某个 app 今天出现过一次，以后
--- 半年前的记录也能显示中文名。
+-- 一次就落盘。写在 overlay 的 /etc/oaf/data 上是为了跨重启累积：某个 app
+-- 今天出现过一次，以后半年前的记录也能显示中文名。
 local APP_NAME_FILES = {
 	"/etc/oaf/data/app_names.json",
-	"/mnt/mmcblk0p6/oaf/data/app_names.json",
 	"/tmp/oaf-flow/app_names.json",
 }
 
@@ -291,14 +289,13 @@ end
 -- fwx 的 dev_visit_list 只认「今天」：date 参数被忽略，total_num 就是当天
 -- 的条数，而它的库 /tmp/oaf/client.db 在 tmpfs 上，重启就没了。所以 30 天
 -- 的记录由 oaf-flowd 直接读 client.db 的 app_visit_record 表，滚动写到
--- /mnt/mmcblk0p6/oaf/data/visits.json。这里读那份文件，再用 fwx 的当天
+-- /etc/oaf/data/visits.json。这里读那份文件，再用 fwx 的当天
 -- 列表补齐：它带应用名（文件里只有 appid），也能把 flowd 还没同步到的
 -- 最后十几秒补上。
 local VISIT_KEEP_SECONDS = 30 * SECONDS_PER_DAY
--- 只认 flowd 自己的 /etc/oaf/data/visits.json。曾经兜底读过 mmc 数据分区
--- （/mnt/mmcblk0p6）上迁移前的旧文件——但那块分区刷机不擦，重刷固件后会把
--- 上一任安装的 30 天访问记录原样带回来（用户以为刷机从 0 开始，列表里却
--- 全是旧机器的历史），2026-11-09 起废弃该兜底；旧分区已格式化。
+-- 只认 flowd 自己的 /etc/oaf/data/visits.json，不做任何跨固件的历史兜底：
+-- 备份分区刷机不擦，读旧文件会把上一任安装的 30 天记录原样带回来
+-- （用户以为刷机从 0 开始，列表里却全是旧机器的历史）。
 local VISIT_STORE_FILES = {
 	"/etc/oaf/data/visits.json",
 }
@@ -817,9 +814,8 @@ end
 -- 重启一次，当天的计数器跟着清零）。历史页面固定看 30 天，一天一次调用就会
 -- 反复踩这个坑，索性整条链路都不碰它。
 
--- 日汇总从 1.7.5 起写在 eMMC 分区（overlay 只有 1.9G），旧位置留作回退，
--- 卡片被拔掉、分区没挂上时读原来那份，页面不会空。
-local OAF_FLOW_DIRS = { "/etc/oaf/data", "/mnt/mmcblk0p6/oaf/data" }
+-- 日汇总固定写在 overlay 的 /etc/oaf/data 下（由 init 脚本预建 day/ mon/）。
+local OAF_FLOW_DIRS = { "/etc/oaf/data" }
 
 local _flow_day_dir
 
