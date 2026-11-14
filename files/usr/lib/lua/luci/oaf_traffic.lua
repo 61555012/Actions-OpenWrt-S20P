@@ -104,8 +104,8 @@ local function build_index(s)
 				name      = c.name or "",
 				rate_up   = c.rate_up or 0,
 				rate_down = c.rate_down or 0,
-				today_up   = (c.day_up or 0) + (c.live_up or 0),
-				today_down = (c.day_down or 0) + (c.live_down or 0),
+				today_up   = c.day_up or 0,
+				today_down = c.day_down or 0,
 				-- 今天有流量累计了多少秒。fwx 的那个值在本固件上是个常数，
 				-- 采样器自己数，页面才有东西可更新。
 				day_active = c.day_active or 0,
@@ -120,11 +120,13 @@ local function build_index(s)
 				ip6_list   = c.ip6_list,
 				rate_up6   = c.rate_up6 or 0,
 				rate_down6 = c.rate_down6 or 0,
-				today_up6   = (c.day_up6 or 0) + (c.live_up6 or 0),
-				today_down6 = (c.day_down6 or 0) + (c.live_down6 or 0),
-				-- 采样器看到的实时连接条数（conntrack 里该设备的 flow 行数）。
-				-- index 随 snapshot 缓存（1 秒），连接数跟着速率同节奏刷新。
-				flows = c.flows or 0,
+				today_up6   = c.day_up6 or 0,
+				today_down6 = c.day_down6 or 0,
+			-- 采样器看到的实时连接条数（conntrack 里该设备的 flow 行数）。
+			-- v4 和 v6 一起数：采集器对每条流按归一化后的 IPv6 地址找
+			-- 邻居表，命中就归到这台设备，flows 是合计，flows6 是其中 v6。
+			flows = c.flows or 0,
+			flows6 = c.flows6 or 0,
 			}
 		end
 	end
@@ -155,7 +157,6 @@ end
 -- 的 day_up/day_down。fwx 的小时流量挂在 netfilter 钩子上：oafd 重启就
 -- 清零（今天 09:27 重启后柱状图只剩 1.5MB，而设备实际下行 154M），
 -- 硬件卸载的流量也记不全，所以详情页的今日流量柱状图改用这里的数据。
-local HOURLY = "/tmp/oaf-flow/hourly.json"
 
 -- whole-LAN picture: today's bytes and the current speed, in bytes
 function M.totals()
@@ -207,11 +208,13 @@ function M.client_hours(mac)
 	return nil
 end
 
--- daily totals from oaf-flowd's own day files: [[date, up, down], ...], oldest
--- first. Empty when the directory is missing.
+-- daily totals from the sampler's own day files: [[date, up, down], ...],
+-- oldest first. All of them live on tmpfs now (reboot clears them).
+local DAY_DIR = "/tmp/oaf-flow/day"
+
 function M.days(limit)
 	limit = limit or 30
-	local p = io.popen("ls -1 /etc/oaf/data/day 2>/dev/null | sort | tail -n " .. tonumber(limit))
+	local p = io.popen("ls -1 " .. DAY_DIR .. " 2>/dev/null | sort | tail -n " .. tonumber(limit))
 	if not p then
 		return {}
 	end
@@ -219,7 +222,7 @@ function M.days(limit)
 	for name in p:lines() do
 		local date = name:match("^(%d%d%d%d%-%d%d%-%d%d)%.json$")
 		if date then
-			local f = read_json("/etc/oaf/data/day/" .. name)
+			local f = read_json(DAY_DIR .. "/" .. name)
 			if f then
 				local up, down = 0, 0
 				for _, c in ipairs(f.clients or {}) do
@@ -281,102 +284,7 @@ function M.vendor(mac)
 	return v
 end
 
--- 无线客户端信息（信号强度 / 协商速率 / 频段），ubus -> libiwinfo。
--- fwx(oafd) 活着的时候它也提供同样的字段；它不在（appfilter 未装、
--- oafd 挂了）时这是唯一来源——没有它，列表页的信号列整列消失、详情页
--- 的无线信息一栏全空。结果缓存 6 秒；没有无线（或驱动没有 iwinfo 胶水）
--- 的机器只会得到空表和 support=false，页面照常降级。
-local wl_cache, wl_at, wl_support = nil, 0, nil
-local wl_band, wl_band_at = {}, 0
-
-local function ubus_json(args)
-	local p = io.popen("ubus call " .. args .. " 2>/dev/null")
-	if not p then
-		return nil
-	end
-	local out = p:read("*a")
-	p:close()
-	if out and out ~= "" then
-		local ok, j = pcall(jsonc.parse, out)
-		if ok then
-			return j
-		end
-	end
-	return nil
-end
-
-local function device_band(dev)
-	-- radio 的频段不重新配置就不会变，缓存 10 分钟；按频率判：
-	-- < 3GHz 是 2.4G，到 ~5.9GHz 是 5G，再往上 6G
-	local now = os.time()
-	if wl_band[dev] and now - wl_band_at < 600 then
-		return wl_band[dev]
-	end
-	local info = ubus_json(string.format("iwinfo info '%s'", dev))
-	local band
-	if info and tonumber(info.frequency) then
-		local mhz = tonumber(info.frequency)
-		if mhz < 3000 then
-			band = "2g"
-		elseif mhz < 5900 then
-			band = "5g"
-		else
-			band = "6g"
-		end
-		wl_band[dev] = band
-		wl_band_at = now
-	end
-	return band
-end
-
--- map[MAC] = { rssi, tx_rate, rx_rate, ifname, band }。速率单位 kbit/s，
--- 与 fwx 一致（前端除以 1000 显示 Mbit/s）。apcli*/apclix* 是中继模式的
--- 上联口，不会挂我们的局域网客户端，跳过。
-function M.wireless()
-	local now = os.time()
-	if wl_cache and now - wl_at < 6 then
-		return wl_cache, wl_support
-	end
-	wl_at = now
-	local out, support = {}, false
-	local devices = ubus_json("iwinfo devices")
-	for _, dev in ipairs((type(devices) == "table" and devices.devices) or {}) do
-		if type(dev) == "string" and dev:sub(1, 5) ~= "apcli" then
-			support = true
-			local band = device_band(dev)
-			local al = ubus_json(string.format("iwinfo assoclist '%s'", dev))
-			for _, st in ipairs((al and al.results) or {}) do
-				local mac = tostring(st.mac or ""):upper()
-				if mac ~= "" then
-					out[mac] = {
-						rssi    = tonumber(st.signal),
-						tx_rate = st.tx and tonumber(st.tx.rate) or nil,
-						rx_rate = st.rx and tonumber(st.rx.rate) or nil,
-						ifname  = dev,
-						band    = band,
-					}
-				end
-			end
-		end
-	end
-	wl_cache, wl_support = out, support
-	return out, support
-end
-
--- 列表页信号列的开关（get_system_base_info 的 wireless_support 兜底）
-function M.wireless_support()
-	M.wireless()
-	return wl_support
-end
-
--- 单个客户端的无线信息；不在任何 radio 的 assoclist 里（有线设备）返回 nil
-function M.wireless_user(mac)
-	local w = M.wireless()
-	if not w or not mac then
-		return nil
-	end
-	return w[mac_key(mac)]
-end
+-- 本机无无线接口（无 ieee80211、iwinfo devices 为空），libiwinfo 探测已整体移除。
 
 -- A link-local address only repeats the MAC in another notation, so it is
 -- never worth a row of its own.
@@ -468,23 +376,18 @@ function M.merge_user(u)
 	-- 实时连接条数（conntrack 里该设备的 flow 行数），列表页的「连接数」
 	-- 列在慢通道首次渲染用它，之后由 live_rates 快通道每秒刷新。
 	u.flows = c.flows or 0
+	u.flows6 = c.flows6 or 0
 	u.today_up_bytes = c.today_up
 	u.today_down_bytes = c.today_down
-	-- 上网时长用采样器的 day_active：1.8.0 起它是"活跃秒数"口径——某一
-	-- 轮采样里这条设备真的搬了字节（超过心跳阈值）才算时间，挂机的 QQ/
-	-- 微信/输入法长连接不再贡献时长。flowd 是权威口径，0 就是「这一天
-	-- 还没真正用过」，不透传 fwx 的粗采样值（手机没开屏只有 4 分钟、
-	-- 挂机长连接又能推到 100+ 分钟，两头都不对）。设备不在采样器里
-	-- （刚接入、tmpfs 过期）时保持 fwx 原值。
+	-- 「今日上网时长」= 有活动连接的时长。采集器按采样窗口判定：这一轮
+	-- 该设备搬够 2 KiB 才计这一轮的秒数，挂机一天的搜狗输入法 / QQ /
+	-- 推送长连接只有几百字节心跳，一秒都不算。同一轮多条流只计一次。
 	u.today_active_time = c.day_active or 0
-	-- 今日在线时长 = 设备接到网络的墙钟时间，必然 >= 上网时长。
-	-- fwx（oafd）在时它给的是会话口径，flowd 给的是在网口径，两者取大的；
-	-- 两者都没有（旧采样器、刚接入）时，用上网时长兜底——上过网的每一秒
-	-- 一定是在网的，绝不能出现「上网 59m / 在线 3m」这种倒挂。
-	-- 之前只在 fwx 值为 0 时才用 flowd，重启后 flowd 的在线计数重新从 0
-	-- 起算、上网时长却从日文件恢复，于是一直被这个 0 挡住。
-	local online = tonumber(u.today_online_time) or 0
-	if (c.day_online or 0) > online then online = c.day_online end
+	-- 「今日在线时长」= 连接路由器的时长（ARP / IPv6 邻居表里在网、
+	-- 或 conntrack 仍有连接），空闲也算，与 fwx 的会话口径不再混算。
+	-- 采集器是唯一口径，重启从 0 开始，两者都不会被旧值抬高。
+	-- 只做一个下限保护：活跃秒数绝不能超过在网秒数。
+	local online = c.day_online or 0
 	if (c.day_active or 0) > online then online = c.day_active end
 	u.today_online_time = online
 	u.up_rate6 = c.rate_up6
@@ -504,14 +407,18 @@ function M.merge_user(u)
 end
 
 -- Same, for a whole list (user list, active users, top users).
+-- 没有 oaf-flowd（本次只移植前端）时仍要补 OUI 厂商名：
+-- merge_user() 在 client() 为 nil 时提前返回，但 vendor 是在那之前写的。
+-- 所以这里不再因快照不可用而整表跳过。
 function M.merge_list(list)
-	if type(list) ~= "table" or not M.ready() then
+	if type(list) ~= "table" then
 		return false
 	end
+	local ready = M.ready()
 	for _, u in ipairs(list) do
 		M.merge_user(u)
 	end
-	return true
+	return ready
 end
 
 -- Per-app traffic for one client. Source is oaf-flowd's apps.json:
@@ -524,6 +431,10 @@ end
 -- is offloaded - that is why the top-apps chart only ever showed the first
 -- few packets of a long connection.
 local APPS = "/tmp/oaf-flow/apps.json"
+-- 有流量的访问段：{mac: [{id, ft, lt}, ...]}，秒级，由采样器在判定
+-- 「这一轮该应用搬了 >= 2 KiB」时写入。访问记录表用它，因此不会出现
+-- 挂机心跳那种 tt=0、每分钟一条的记录。
+local ACTIVE = "/tmp/oaf-flow/active.json"
 local apps_cache, apps_at = nil, 0
 
 function M.app_traffic(mac)
@@ -550,6 +461,7 @@ end
 -- while one that actually carries data accumulates one tick per sample round.
 -- Returns nil when the sampler has no usable data for today.
 local appact_cache, appact_at = nil, 0
+local seg_cache, seg_at = nil, 0
 
 function M.client_app_active(mac)
 	if not mac or mac == "" then
@@ -587,6 +499,56 @@ function M.client_app_active(mac)
 		return nil
 	end
 	return { apps = total, hours = hours }
+end
+
+-- Per-app BYTES per Beijing hour, from apps.json's "h" field. The pie chart
+-- and "today's top apps" bars used to be time-only; when every flow is marked
+-- appid=0 (feature library coverage) the time path can be empty while there
+-- are hundreds of MB of real traffic. This gives the charts a byte axis that
+-- always has data, including an explicit "未识别" (id 0) bucket.
+--   { [hour] = { [appid] = up + down } }
+function M.client_app_bytes(mac)
+	if not mac or mac == "" then return {} end
+	local list = M.app_traffic(mac)
+	local hours = {}
+	if type(list) ~= "table" then return hours end
+	for _, a in ipairs(list) do
+		local id = tonumber(a.id) or 0
+		if type(a.h) == "table" then
+			for h, v in pairs(a.h) do
+				local hh = tonumber(h)
+				if hh and type(v) == "table" then
+					local row = hours[hh]
+					if not row then row = {}; hours[hh] = row end
+					row[id] = (row[id] or 0) + (tonumber(v.up) or 0) + (tonumber(v.down) or 0)
+				end
+			end
+		end
+	end
+	return hours
+end
+
+-- 一台设备的「有流量访问段」，来自采样器的 active.json。
+--   { {id = appid, ft = epoch, lt = epoch}, ... }  最近的在前
+-- 判定门槛和「今日常用APP」的活跃秒完全同源（同一轮 2 KiB），因此两个
+-- 视图的条目和时长不会互相矛盾。返回 nil 表示这份数据还没生成（采样器
+-- 刚重启），调用方自行决定回退策略。
+function M.client_active_segments(mac)
+	if not mac or mac == "" then return nil end
+	local now = os.time()
+	if not seg_cache or now - seg_at >= 2 then
+		seg_at = now
+		local s = read_json(ACTIVE)
+		if not s or (s.updated and now - s.updated > STALE) then
+			seg_cache = false
+		else
+			seg_cache = s.clients or {}
+		end
+	end
+	if seg_cache == false then return nil end
+	local list = seg_cache[mac:lower()] or seg_cache[mac:upper()]
+	if type(list) ~= "table" then return {} end
+	return list
 end
 
 -- Flow offload as the firewall config sees it. Read, not parsed by uci: this

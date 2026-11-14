@@ -18,3 +18,7 @@ files/usr/lib/lua/luci/oaf_app_names.lua text eol=lf
 *.png binary
 *.bin binary
 *.itb binary
+
+# /www/cgi-bin 下的快通道是脚本：CRLF 会让 shebang 变成 /bin/sh\r，
+# busybox 直接报 bad interpreter，快通道整个失效。
+files/www/cgi-bin/* text eol=lf
