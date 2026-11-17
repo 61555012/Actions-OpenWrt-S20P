@@ -10,14 +10,25 @@
 #
 set -e
 
-echo "==== [diy-part2] OAF 识别内核: 只留 oaf.ko + open-app-filter, 删除 luci-app-oaf 界面 ===="
-find . -type d \( -name "OpenAppFilter" -o -name "luci-app-oaf" -o -name "open-app-filter" \) -exec rm -rf {} +
+# 用户列表: luci-app-oaf-lite (自包含 C 采样器 + LuCI 页面)
+# 已迁移到新版插件: 不再 clone OpenAppFilter、不编 oaf.ko/appfilter/oafd。
+# L7 标签靠抓流首包 (TLS SNI / HTTP Host / QUIC / DNS), 字节数靠 conntrack
+# 差分 + MTK HNAT 连接计数回写。这里把仓库自带的 package/luci-app-oaf-lite
+# 放进源码树, 由 make 编译出 /usr/bin/oaf-lite。
+echo "==== [diy-part2] 用户列表: 装入 luci-app-oaf-lite (不再编 oaf.ko / appfilter / oafd) ===="
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
+# 旧内核套件与官方界面残留一律清掉, 避免与本地包同名冲突
+find . -type d \( -name "OpenAppFilter" -o -name "luci-app-oaf" -o -name "open-app-filter" \) \
+	-exec rm -rf {} + 2>/dev/null || true
 rm -rf package/feeds/*/luci-app-oaf package/feeds/*/OpenAppFilter
-git clone https://github.com/destan19/OpenAppFilter package/OpenAppFilter
-# luci-app-oaf 界面已由自研「状态 → 用户列表」插件(files/ 内)替代, 删掉避免菜单重复;
-# oaf 内核模块写 conntrack 标记、open-app-filter(oafd) 维护访问记录库,
-# 是用户列表插件 APP 统计 / 访问记录 / APP 时长的唯一数据源, 必须保留。
-rm -rf package/OpenAppFilter/luci-app-oaf
+PKG_SRC="$REPO_ROOT/package/luci-app-oaf-lite"
+if [ ! -f "$PKG_SRC/Makefile" ] || [ -z "$(ls -A "$PKG_SRC/src" 2>/dev/null)" ]; then
+  echo "    ❌ 缺少 package/luci-app-oaf-lite (Makefile 或 src/ 为空): $PKG_SRC"; exit 1
+fi
+rm -rf package/luci-app-oaf-lite
+cp -a "$PKG_SRC" package/luci-app-oaf-lite
+echo "    ✅ package/luci-app-oaf-lite ($(ls package/luci-app-oaf-lite/src/*.c 2>/dev/null | wc -l) 个 .c 源文件)"
+grep -m1 '^PKG_VERSION' package/luci-app-oaf-lite/Makefile | sed 's/^/       /'
 
 echo "==== [diy-part2] 修复 S20P 两个 2.5G 口指示灯 (0x001b -> 0x321b) ===="
 LED_DTS="target/linux/mediatek/dts-ext/mt7986a-clx-s20p.dts"

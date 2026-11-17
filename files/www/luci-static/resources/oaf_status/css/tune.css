@@ -64,9 +64,13 @@
 }
 
 .user-detail-header { margin-bottom: var(--oaf-gap) !important; gap: var(--oaf-gap) !important; }
-/* 标签栏（基本信息 / APP统计 / …）交给页面自己的内联样式：两台的标签
-   几何、窄屏三列按钮、暗色配色都在页面里，tune.css 原先用 !important 把
-   内边距撑到 8px/14px 并加 gap，导致与 6.1 看起来不是一套。 */
+.tab-list {
+	margin: 0 0 var(--oaf-gap-lg) !important;
+	gap: 6px !important;
+	flex-wrap: wrap !important;
+}
+.tab-item { padding: 8px 14px !important; }
+.tab-body { padding: var(--oaf-gap) 0 var(--oaf-gap-lg) !important; }
 .bar-chart, .pie-chart { margin-bottom: var(--oaf-gap) !important; }
 .history-traffic-panel,
 .app-traffic-panel,
@@ -160,6 +164,16 @@
 [data-darkmode="true"] .cbi-section-table tr.table-titles,
 [data-darkmode="true"] #user_status_table tr:first-child { background: rgba(255, 255, 255, 0.045) !important; }
 
+[data-darkmode="true"] .tab-list { border-color: var(--oaf-line) !important; }
+[data-darkmode="true"] .tab-item {
+	color: #cbd5e1 !important;
+	border-color: var(--oaf-line) !important;
+	background: rgba(255, 255, 255, 0.03) !important;
+}
+[data-darkmode="true"] .tab-item.active {
+	background: rgba(255, 255, 255, 0.12) !important;
+	color: #ffffff !important;
+}
 [data-darkmode="true"] .modal-content,
 [data-darkmode="true"] .common-modal-content {
 	background: #20242b !important;
@@ -205,6 +219,9 @@
 	.user-card-line { font-size: 12px !important; }
 	.user-detail-header { flex-wrap: wrap !important; }
 	.user-detail-title { font-size: 15px !important; }
+	.tab-list { gap: 4px !important; }
+	.tab-item { padding: 7px 10px !important; font-size: 12px !important; }
+	.tab-body { padding: var(--oaf-gap) 0 var(--oaf-gap-lg) !important; }
 	#hourly_traffic_chart,
 	#hourly_apps_chart,
 	#app_time_chart,
@@ -267,6 +284,7 @@
 	#app_time_chart,
 	#history_traffic_chart { height: 240px !important; }
 	.user-card-line { gap: 8px !important; }
+	.tab-item { padding: 6px 8px !important; font-size: 11px !important; }
 	.history-sum-item { flex: 1 1 45% !important; }
 	.view-mode-btn { padding: 6px 10px !important; }
 }

@@ -1,0 +1,30 @@
+#!/bin/sh
+# oaf-lite (用户列表插件) 默认设置 — S20P / ImmortalWrt 25.12 / MT7986 版
+# 固件首次启动时执行一次（files/ 合并后 init.d 已就位）。
+
+# 1) 确保 zh-cn 语言文件是真正的 .lmo。源码树里只有 base64 副本，
+#    tar 直接部署会跳过 OpenWrt 的 po2lmo 步骤，这里兜底解码。
+LMO=/usr/lib/lua/luci/i18n/oaf_status.zh-cn.lmo
+B64=/usr/share/oaf_status/i18n-base64/oaf_status.zh-cn.lmo.b64
+if [ ! -s "$LMO" ] && [ -s "$B64" ]; then
+	mkdir -p "$(dirname "$LMO")"
+	base64 -d "$B64" > "$LMO" 2>/dev/null && chmod 644 "$LMO"
+fi
+
+# 2) oaf-lite 采样器开机自启
+if [ -x /etc/init.d/oaf-lite ]; then
+	/etc/init.d/oaf-lite enable
+fi
+
+# 3) 网络-网络加速: 默认启用 MediaTek HNAT 引擎并打开「HNAT 连接计数更新」。
+#    HNAT 硬件卸载后 conntrack 字节计数默认冻结; oaf-lite 靠 conntrack 差分
+#    统计字节数, 不回写会少算 95% 以上。S20P(mt7986a) 必须保留这段。
+uci -q get turboacc.config >/dev/null 2>&1 || uci -q set turboacc.config=turboacc
+uci -q set turboacc.config.fastpath='mediatek_hnat'
+uci -q set turboacc.config.fastpath_mh_bind_rate='30'
+uci -q set turboacc.config.fastpath_mh_update_nfct='1'
+uci -q commit turboacc
+
+# 4) LuCI 缓存: 让新的「状态 → 用户列表」菜单无需重启即可显示
+rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
+exit 0

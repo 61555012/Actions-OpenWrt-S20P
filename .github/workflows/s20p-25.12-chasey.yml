@@ -5,7 +5,7 @@
 # 配置:     configs/25.12/s20p-chasey-25.12.config
 # DIY:      diy/25.12/diy-part{1,2}.sh
 # 特性:
-#   - OpenAppFilter (删除源码自带, 重拉 destan19 最新版)
+#   - luci-app-oaf-lite (自包含 C 采样器, 替代 OpenAppFilter)
 #   - argon 主题 + 主题设置: 拉取 jerrykuku v3.1.1 (默认居中登录页 + Bing 壁纸)
 #   - 修复 2.5G 口 LED (dts-ext/mt7986a-clx-s20p.dts: 0x001b -> 0x321b)
 #   - 工具链缓存复用: actions/cache + Release(toolchain-cache) 双级缓存
@@ -208,31 +208,34 @@ jobs:
         fi
         echo "✅ 防火墙 (fw4/nftables) 默认开启校验通过"
 
-    # 强校验: OAF 识别内核必须编译进固件（用户列表插件的 APP 识别数据源）。
-    # 包名 ≠ destan19 目录名: oaf/ 目录定义的是 KernelPackage/oaf（真名
-    # kmod-oaf），open-app-filter/ 目录定义的是 Package/appfilter（真名
-    # appfilter）。名字写错时 make defconfig 会静默丢包——固件照常出包，
-    # 但 oafd 没了，用户列表/访问记录/APP 统计全部空白，必须在这里拦住。
-    - name: Verify OAF recognition kernel
+    # 强校验: 新版用户列表插件 (luci-app-oaf-lite) 必须编译进固件。
+    # 该包是自包含 C 采样器, 不再需要 oaf.ko/appfilter/oafd; 缺包会导致
+    # 用户列表/访问记录/APP 统计整页空白, 必须在这里拦住。
+    - name: Verify user-list plugin (luci-app-oaf-lite)
       run: |
         cd openwrt
         ok=1
         check() {
           if grep -q "^$1=y" .config; then echo "✅ $1";
-          else echo "❌ $1 未选中 -> OAF 识别内核缺失"; ok=0; fi
+          else echo "❌ $1 未选中 -> 用户列表插件缺失"; ok=0; fi
         }
-        check CONFIG_PACKAGE_appfilter
-        check CONFIG_PACKAGE_kmod-oaf
-        if grep -q '^CONFIG_PACKAGE_luci-app-oaf=y' .config; then
-          echo "❌ luci-app-oaf 界面不应启用（已由自研用户列表插件替代）"; ok=0
+        check CONFIG_PACKAGE_luci-app-oaf-lite
+        check CONFIG_PACKAGE_conntrack
+        check CONFIG_PACKAGE_luci-compat
+        check CONFIG_PACKAGE_lua
+        if grep -qE '^CONFIG_PACKAGE_(appfilter|kmod-oaf|luci-app-oaf)=y' .config; then
+          echo "❌ 旧 OAF 内核/界面不应启用（已由 luci-app-oaf-lite 替代）"; ok=0
         else
-          echo "✅ luci-app-oaf 已排除"
+          echo "✅ 旧 OAF 内核/界面已排除"
+        fi
+        if [ ! -f package/luci-app-oaf-lite/Makefile ]; then
+          echo "❌ 缺少 package/luci-app-oaf-lite/Makefile"; ok=0
         fi
         if [ "$ok" != "1" ]; then
-          echo "❌ OAF 识别内核校验失败, 终止编译"
+          echo "❌ 用户列表插件校验失败, 终止编译"
           exit 1
         fi
-        echo "✅ OAF 识别内核 (appfilter + kmod-oaf) 校验通过"
+        echo "✅ 用户列表插件 (luci-app-oaf-lite + conntrack + lua compat) 校验通过"
 
     - name: Generate toolchain cache key
       id: cache-key
@@ -451,7 +454,7 @@ jobs:
           echo "| 源码 | $REPO_URL |"
           echo "| 分支 | $REPO_BRANCH |"
           echo "| 设备 | clx_s20p / filogic |"
-          echo "| 插件 | OpenAppFilter（用户列表 / APP 识别） |"
+          echo "| 插件 | luci-app-oaf-lite（用户列表 / APP 识别） |"
           echo "| LED  | 2.5G 口已修复 |"
           echo "| 时间 | $(date '+%Y-%m-%d %H:%M:%S') (Shanghai) |"
         } > release.txt
